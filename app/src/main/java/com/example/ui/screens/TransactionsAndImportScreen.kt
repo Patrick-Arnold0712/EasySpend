@@ -199,7 +199,7 @@ fun TransactionsAndImportScreen(
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
-                                    text = "选择微信或支付宝导出的 CSV 账单文件，或开启支付通知自动抓账。所有新记录都会先帮你查重和预分类，核对无误再写入账本。",
+                                    text = "选择微信 (.xlsx / .csv) 或支付宝 (.csv) 账单文件，或开启支付通知自动抓账。所有新记录都会先帮你查重和预分类，核对无误再写入账本。",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -211,7 +211,7 @@ fun TransactionsAndImportScreen(
                                     FilledTonalButton(
                                         onClick = {
                                             pendingChannelPicker = PaymentChannel.WECHAT_PAY
-                                            csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*"))
+                                            csvLauncher.launch(arrayOf("*/*"))
                                         },
                                         contentPadding = splitBtnPadding,
                                         modifier = Modifier
@@ -225,7 +225,7 @@ fun TransactionsAndImportScreen(
                                     FilledTonalButton(
                                         onClick = {
                                             pendingChannelPicker = PaymentChannel.ALIPAY
-                                            csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*"))
+                                            csvLauncher.launch(arrayOf("*/*"))
                                         },
                                         contentPadding = splitBtnPadding,
                                         modifier = Modifier
@@ -346,7 +346,7 @@ fun TransactionsAndImportScreen(
                             EmptyStateCard(
                                 icon = Icons.Default.Check,
                                 title = "待核对列表很干净",
-                                subtitle = "点上方「载入演示账单」或导入微信/支付宝 CSV，系统会自动帮你找出重复扣款、退款与拿不准的商户。"
+                                subtitle = "点上方「载入演示账单」或导入微信 (.xlsx / .csv) / 支付宝账单，系统会自动帮你找出重复扣款、退款与拿不准的商户。"
                             )
                         }
                     } else {

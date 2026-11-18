@@ -22,6 +22,7 @@ import com.example.domain.finance.ClassificationEngine
 import com.example.domain.finance.DemoStatementFactory
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
+import com.example.domain.finance.ParsedRawRecord
 import com.example.domain.finance.StatementImporter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -147,6 +148,27 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         if (records.isEmpty()) {
             return Result.failure(IllegalArgumentException("未在文件中识别到有效的微信/支付宝交易行"))
         }
+        return stageParsedRecords(records, sourceLabel, preferredChannel)
+    }
+
+    suspend fun importXlsxIntoReviewQueue(
+        xlsxBytes: ByteArray,
+        sourceLabel: String,
+        preferredChannel: PaymentChannel? = null
+    ): Result<ImportBatchEntity> {
+        val records = StatementImporter.parseXlsxStatement(xlsxBytes, preferredChannel)
+        if (records.isEmpty()) {
+            return Result.failure(IllegalArgumentException("未在 Excel (.xlsx) 账单中识别到有效的交易记录"))
+        }
+        return stageParsedRecords(records, sourceLabel, preferredChannel)
+    }
+
+    private suspend fun stageParsedRecords(
+        records: List<ParsedRawRecord>,
+        sourceLabel: String,
+        preferredChannel: PaymentChannel?
+    ): Result<ImportBatchEntity> {
+        ensureInitialized(MoneyFormatter.monthKeyFromMillis(records.first().occurredAtMillis))
         val channel = preferredChannel ?: records.first().channel
         val existingTxs = txDao.getAll()
         val existingPending = importDao.getPendingCandidates()

@@ -113,7 +113,10 @@ object ClassificationEngine {
         return when {
             combined.contains("食堂") || combined.contains("餐厅") || combined.contains("外卖") ||
                 combined.contains("咖啡") || combined.contains("奶茶") || combined.contains("餐饮") ||
-                combined.contains("麦当劳") || combined.contains("肯德基") || combined.contains("饭") ->
+                combined.contains("麦当劳") || combined.contains("肯德基") || combined.contains("饭") ||
+                combined.contains("小吃") || combined.contains("水饺") || combined.contains("大饼") ||
+                combined.contains("烧仙草") || combined.contains("春晖园") || combined.contains("松涛园") ||
+                combined.contains("学五") || combined.contains("面") || combined.contains("东厅") ->
                 ClassificationResult("food", ClassificationSource.RULE_ENGINE, 0.94f, false, "规则匹配饮食餐饮")
 
             combined.contains("打印") || combined.contains("教材") || combined.contains("出版") ||

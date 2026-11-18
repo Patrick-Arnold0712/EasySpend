@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
@@ -31,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -72,6 +74,7 @@ fun DashboardScreen(
     onNavigateToImportQueue: () -> Unit,
     onNavigateToBudget: () -> Unit,
     onNavigateToAgentWithPrompt: (String) -> Unit,
+    onDismissBeginnerGuide: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val summary = state.summary
@@ -247,37 +250,57 @@ fun DashboardScreen(
                 }
             }
 
-            // 3. Beginner-Friendly Quick Experience Card
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = semantic.cardBorder,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+            // 3. Beginner-Friendly Quick Experience Card (dismissible)
+            if (!state.settings.hideBeginnerGuide) {
+                item(key = "beginner_guide_card") {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("beginner_guide_card"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = semantic.cardBorder,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.PlaylistAddCheck,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.PlaylistAddCheck,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "新手快速体验",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+                                IconButton(
+                                    onClick = onDismissBeginnerGuide,
+                                    modifier = Modifier.testTag("dismiss_beginner_guide_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "关闭新手快速体验",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = "新手快速体验",
-                                style = MaterialTheme.typography.titleMedium
+                                text = "第一次使用？点一下即可导入模拟大学生生活费账单，体验查重核对、存钱预测与 AI 预算规划。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        Text(
-                            text = "第一次使用？点一下即可导入模拟大学生生活费账单，体验查重核对、存钱预测与 AI 预算规划。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                         val compactButtonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -333,6 +356,7 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
             }
 
             // 4. Spending Structure Donut Card

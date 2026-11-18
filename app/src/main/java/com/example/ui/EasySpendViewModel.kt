@@ -36,6 +36,7 @@ import com.example.data.repository.EasySpendRepository
 import com.example.domain.finance.BudgetAndForecastEngine
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
+import com.example.domain.finance.XlsxStatementParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -93,7 +94,7 @@ data class EasySpendUiState(
     val agentMessages: List<AgentChatMessage> = listOf(
         AgentChatMessage(
             isUser = false,
-            text = "你好，我是你的易支道财务助手。你可以直接问我本月还能存多少钱、哪些花销容易超支，或让我帮你算一算怎么调整弹性预算。配置好上方 API Key 后即可随时对话："
+            text = "你好，我是易支道财务助手。配置上方 API Key 后，可直接问我存钱空间、超支风险或预算调整建议："
         )
     ),
     val apiTestFeedback: ApiTestFeedback = ApiTestFeedback(),
@@ -241,23 +242,33 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     fun importCsvFromUri(context: Context, uri: Uri, preferredChannel: PaymentChannel? = null) {
         viewModelScope.launch {
             try {
-                val content = withContext(Dispatchers.IO) {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("无法读取所选文件")
-                    decodeStatementBytes(bytes)
                 }
-                val result = repository.importCsvIntoReviewQueue(
-                    csvContent = content,
-                    sourceLabel = "${preferredChannel?.displayName ?: "账单"}文件导入",
-                    preferredChannel = preferredChannel
-                )
+                val isXlsx = XlsxStatementParser.isXlsxBytes(bytes)
+                val sourceLabel = "${preferredChannel?.displayName ?: "账单"}${if (isXlsx) "Excel" else "CSV"}导入"
+                val result = if (isXlsx) {
+                    repository.importXlsxIntoReviewQueue(
+                        xlsxBytes = bytes,
+                        sourceLabel = sourceLabel,
+                        preferredChannel = preferredChannel
+                    )
+                } else {
+                    val content = withContext(Dispatchers.Default) { decodeStatementBytes(bytes) }
+                    repository.importCsvIntoReviewQueue(
+                        csvContent = content,
+                        sourceLabel = sourceLabel,
+                        preferredChannel = preferredChannel
+                    )
+                }
                 result.onSuccess { batch ->
                     _bannerMessage.value = "已解析 ${batch.totalCount} 笔记录（正常 ${batch.cleanCount} 笔，差异/存疑 ${batch.discrepancyCount} 笔），请核对后入账。"
                 }.onFailure { err ->
                     _bannerMessage.value = err.localizedMessage ?: "账单解析失败"
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "CSV import failed", e)
+                Log.e(TAG, "Statement import failed", e)
                 _bannerMessage.value = "导入失败：${e.localizedMessage ?: "文件读取异常"}"
             }
         }
@@ -617,6 +628,16 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleDarkMode(currentlyDark: Boolean) {
         val next = if (currentlyDark) ThemeMode.LIGHT else ThemeMode.DARK
         setThemeMode(next)
+    }
+
+    fun dismissBeginnerGuide() {
+        setHideBeginnerGuide(true)
+    }
+
+    fun setHideBeginnerGuide(hidden: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setHideBeginnerGuide(hidden)
+        }
     }
 
     fun saveApiConfig(

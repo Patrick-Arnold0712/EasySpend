@@ -41,18 +41,40 @@ object StatementImporter {
         val normalizedContent = csvContent.removePrefix("\uFEFF")
         val lines = normalizedContent.lines().map { it.trim().removePrefix("\uFEFF") }.filter { it.isNotEmpty() }
         if (lines.isEmpty()) return emptyList()
+        val rows = lines.map { splitCsvLine(it) }
+        return parseStatementRows(rows, preferredChannel)
+    }
 
-        val headerIndex = lines.indexOfFirst { line ->
-            (line.contains("交易时间") && (line.contains("金额") || line.contains("收/支"))) ||
-                (line.contains("time", ignoreCase = true) && line.contains("amount", ignoreCase = true))
+    fun parseXlsxStatement(
+        xlsxBytes: ByteArray,
+        preferredChannel: PaymentChannel? = null
+    ): List<ParsedRawRecord> {
+        val rows = XlsxStatementParser.parseRows(xlsxBytes)
+        if (rows.isEmpty()) return emptyList()
+        return parseStatementRows(rows, preferredChannel)
+    }
+
+    fun parseStatementRows(
+        rows: List<List<String>>,
+        preferredChannel: PaymentChannel? = null
+    ): List<ParsedRawRecord> {
+        if (rows.isEmpty()) return emptyList()
+
+        val headerIndex = rows.indexOfFirst { row ->
+            val joined = row.joinToString(" ")
+            (joined.contains("交易时间") && (joined.contains("金额") || joined.contains("收/支"))) ||
+                (joined.contains("time", ignoreCase = true) && joined.contains("amount", ignoreCase = true))
         }
-        if (headerIndex == -1 || headerIndex >= lines.lastIndex) return emptyList()
+        if (headerIndex == -1 || headerIndex >= rows.lastIndex) return emptyList()
 
-        val headers = splitCsvLine(lines[headerIndex]).map { it.trim() }
+        val headers = rows[headerIndex].map { it.trim() }
+        val headerMetaText = rows.take(headerIndex + 1).flatten().joinToString(" ")
         val isWeChat = preferredChannel == PaymentChannel.WECHAT_PAY ||
-            lines.take(headerIndex + 1).any { it.contains("微信") || it.contains("商品") && it.contains("交易单号") }
+            headerMetaText.contains("微信") ||
+            (headers.any { it == "商品" } && headers.any { it.contains("交易单号") })
         val isAlipay = preferredChannel == PaymentChannel.ALIPAY ||
-            lines.take(headerIndex + 1).any { it.contains("支付宝") || it.contains("商品说明") || it.contains("交易订单号") }
+            headerMetaText.contains("支付宝") ||
+            headers.any { it.contains("商品说明") || it.contains("交易订单号") }
 
         val channel = when {
             preferredChannel != null -> preferredChannel
@@ -67,8 +89,9 @@ object StatementImporter {
         }
 
         val timeIdx = headers.indexOfFirst { it.contains("交易时间") || it.equals("time", true) }
+        val txTypeIdx = headers.indexOfFirst { it.contains("交易类型") || it.contains("交易分类") }
         val merchantIdx = headers.indexOfFirst { it.contains("交易对方") || it.equals("merchant", true) }
-        val descIdx = headers.indexOfFirst { it.contains("商品说明") || it == "商品" || it.contains("交易类型") || it.contains("description", true) }
+        val descIdx = headers.indexOfFirst { it.contains("商品说明") || it == "商品" || it.contains("description", true) }
         val dirIdx = headers.indexOfFirst { it.contains("收/支") || it.equals("direction", true) }
         val amountIdx = headers.indexOfFirst { it.contains("金额") || it.equals("amount", true) }
         val statusIdx = headers.indexOfFirst { it.contains("状态") || it.equals("status", true) }
@@ -77,8 +100,8 @@ object StatementImporter {
         if (timeIdx == -1 || amountIdx == -1) return emptyList()
 
         val records = mutableListOf<ParsedRawRecord>()
-        for (i in (headerIndex + 1) until lines.size) {
-            val cols = splitCsvLine(lines[i])
+        for (i in (headerIndex + 1) until rows.size) {
+            val cols = rows[i]
             if (cols.size <= maxOf(timeIdx, amountIdx)) continue
 
             val timeStr = cols.getOrNull(timeIdx)?.trim().orEmpty()
@@ -88,14 +111,21 @@ object StatementImporter {
             if (amountFen <= 0L) continue
 
             val dirStr = cols.getOrNull(dirIdx)?.trim().orEmpty()
+            val txTypeStr = cols.getOrNull(txTypeIdx)?.trim().orEmpty()
             val statusStr = cols.getOrNull(statusIdx)?.trim().orEmpty()
             val merchant = cols.getOrNull(merchantIdx)?.trim().orEmpty().ifBlank { "未知商户" }
-            val desc = cols.getOrNull(descIdx)?.trim().orEmpty()
+            val rawGoods = cols.getOrNull(descIdx)?.trim().orEmpty().let { if (it == "/") "" else it }
+            val desc = when {
+                rawGoods.isNotBlank() -> rawGoods
+                txTypeStr.isNotBlank() -> txTypeStr
+                else -> ""
+            }
 
             val direction = when {
                 statusStr.contains("退款") || dirStr.contains("退款") || desc.contains("退款") -> TransactionDirection.REFUND
-                dirStr.contains("不计收支") || dirStr.contains("转账") || statusStr.contains("转账") -> TransactionDirection.TRANSFER
                 dirStr.contains("收入") || dirStr == "+" -> TransactionDirection.INCOME
+                dirStr == "/" || dirStr.contains("中性") || dirStr.contains("不计收支") ||
+                    dirStr.contains("转账") || statusStr.contains("转账") -> TransactionDirection.TRANSFER
                 else -> TransactionDirection.EXPENSE
             }
 
@@ -111,7 +141,7 @@ object StatementImporter {
                 else -> FundingSource.UNASSIGNED
             }
 
-            val refId = cols.getOrNull(refIdx)?.trim()?.takeIf { it.isNotBlank() }
+            val refId = cols.getOrNull(refIdx)?.trim()?.takeIf { it.isNotBlank() && it != "/" }
                 ?: "${channel.name}_${millis}_${amountFen}_${merchant.hashCode()}"
 
             records.add(
@@ -124,7 +154,7 @@ object StatementImporter {
                     fundingSource = fundingSource,
                     sourceType = sourceType,
                     merchant = merchant,
-                    rawDescription = if (statusStr.isNotBlank()) "$desc ($statusStr)" else desc
+                    rawDescription = if (statusStr.isNotBlank()) "$desc ($statusStr)".trim() else desc
                 )
             )
         }
@@ -362,12 +392,18 @@ object StatementImporter {
     }
 
     private fun parseDateMillis(raw: String): Long? {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return null
         for (fmt in dateFormats) {
             try {
-                val parsed = synchronized(fmt) { fmt.parse(raw) }
+                val parsed = synchronized(fmt) { fmt.parse(trimmed) }
                 if (parsed != null) return parsed.time
             } catch (_: Exception) {
             }
+        }
+        val serial = trimmed.toDoubleOrNull()
+        if (serial != null) {
+            return XlsxStatementParser.excelSerialToMillis(serial)
         }
         return null
     }

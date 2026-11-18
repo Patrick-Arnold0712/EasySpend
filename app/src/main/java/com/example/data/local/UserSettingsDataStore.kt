@@ -58,6 +58,7 @@ data class UserSettings(
     val aiCloudAnalysisEnabled: Boolean = true,
     val notificationCaptureEnabled: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val hideBeginnerGuide: Boolean = false,
     val apiProvider: ApiProviderType = ApiProviderType.DEEPSEEK,
     val apiBaseUrl: String = ApiProviderType.DEEPSEEK.defaultBaseUrl,
     val apiKey: String = "",
@@ -76,6 +77,7 @@ class UserSettingsDataStore(private val context: Context) {
         val AI_CLOUD_ENABLED = booleanPreferencesKey("ai_cloud_enabled")
         val NOTIFICATION_CAPTURE_ENABLED = booleanPreferencesKey("notification_capture_enabled")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val HIDE_BEGINNER_GUIDE = booleanPreferencesKey("hide_beginner_guide")
         val API_PROVIDER = stringPreferencesKey("api_provider")
         val API_BASE_URL = stringPreferencesKey("api_base_url")
         val API_KEY = stringPreferencesKey("api_key")
@@ -98,6 +100,7 @@ class UserSettingsDataStore(private val context: Context) {
             aiCloudAnalysisEnabled = prefs[Keys.AI_CLOUD_ENABLED] ?: true,
             notificationCaptureEnabled = prefs[Keys.NOTIFICATION_CAPTURE_ENABLED] ?: true,
             themeMode = parsedTheme,
+            hideBeginnerGuide = prefs[Keys.HIDE_BEGINNER_GUIDE] ?: false,
             apiProvider = parsedProvider,
             apiBaseUrl = prefs[Keys.API_BASE_URL]?.ifBlank { parsedProvider.defaultBaseUrl } ?: parsedProvider.defaultBaseUrl,
             apiKey = prefs[Keys.API_KEY] ?: "",
@@ -133,6 +136,12 @@ class UserSettingsDataStore(private val context: Context) {
     suspend fun setThemeMode(mode: ThemeMode) {
         context.settingsDataStore.edit { prefs ->
             prefs[Keys.THEME_MODE] = mode.name
+        }
+    }
+
+    suspend fun setHideBeginnerGuide(hidden: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[Keys.HIDE_BEGINNER_GUIDE] = hidden
         }
     }
 

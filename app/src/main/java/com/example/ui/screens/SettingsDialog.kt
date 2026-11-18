@@ -148,6 +148,7 @@ fun SettingsAndAuditDialog(
     onSaveApiConfig: (ApiProviderType, String, String, String) -> Unit,
     onTestApiConnection: (ApiProviderType, String, String, String) -> Unit,
     onClearApiTestFeedback: () -> Unit,
+    onToggleBeginnerGuide: (Boolean) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val semantic = MaterialTheme.semanticColors
@@ -250,6 +251,29 @@ fun SettingsAndAuditDialog(
                         checked = state.settings.aiCloudAnalysisEnabled,
                         onCheckedChange = onToggleAiCloud,
                         modifier = Modifier.testTag("privacy_ai_switch")
+                    )
+                }
+
+                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+
+                // Beginner Guide Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("显示「新手快速体验」卡片", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = "关闭总览页新手体验卡片后，可在此重新开启。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = !state.settings.hideBeginnerGuide,
+                        onCheckedChange = onToggleBeginnerGuide,
+                        modifier = Modifier.testTag("show_beginner_guide_switch")
                     )
                 }
 

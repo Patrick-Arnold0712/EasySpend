@@ -300,7 +300,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                 onNavigateToAgentWithPrompt = { prompt ->
                                     agentPrefillPrompt = prompt
                                     navController.navigate(ROUTE_AGENT) { launchSingleTop = true }
-                                }
+                                },
+                                onDismissBeginnerGuide = { viewModel.dismissBeginnerGuide() }
                             )
                         }
                         composable(ROUTE_LEDGER) {
@@ -357,6 +358,7 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     onSaveApiConfig = { p, url, key, model -> viewModel.saveApiConfig(p, url, key, model) },
                     onTestApiConnection = { p, url, key, model -> viewModel.testApiConnection(p, url, key, model) },
                     onClearApiTestFeedback = { viewModel.clearApiTestFeedback() },
+                    onToggleBeginnerGuide = { show -> viewModel.setHideBeginnerGuide(!show) },
                     onDismiss = { showSettings = false }
                 )
             }

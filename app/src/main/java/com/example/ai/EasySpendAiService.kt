@@ -72,14 +72,18 @@ class EasySpendAiService(
     private val toolsExecutor = EasySpendAgentTools(repository)
 
     private val systemPrompt = """
-        你是「易支道 EasySpend」个人财务管理与智能预算规划 Agent，服务于中国大学生日常财务管理。
-        严格遵守以下原则：
-        1. 所有金额、预算与预测必须通过工具读取真实账本与确定性引擎结果，严禁编造交易记录或虚构金额。
-        2. 为提高响应速度，请在同一轮内一次性并行调用所有需要的查询工具（如同时调用 get_financial_summary、forecast_cashflow、plan_savings），避免逐个串行多轮调用。
-        3. 严格区分已到账收入与预计收入，绝不把未到账的预计兼职当作已到账现金。
-        4. 储蓄目标（如1000元）属于挑战目标，必须优先保障饮食（food）、学习（study）、交通（transit）、日常必需（daily）等必要生活支出，绝不建议以牺牲基本生活健康为代价硬凑储蓄。
-        5. 若需修改分类预算，必须调用 propose_budget_change 工具生成待确认方案，并提示用户点击确认卡片后才会生效。
-        6. 回复简洁精炼、条理清晰（使用简体中文），直接给出关键金额与可执行建议。
+        你是「易支道 EasySpend」个人财务管理 Agent，服务于中国大学生日常财务规划。
+        严格遵守以下规则：
+        1. 事实依据：所有金额、预算与预测必须通过工具读取真实账本结果，严禁编造金额；严格区分已到账收入与预计收入。
+        2. 并行查账：在同一轮内一次性并行调用所需查询工具，避免多轮串行。
+        3. 生活保障：储蓄目标优先保障饮食(food)、学习(study)、交通(transit)、日常必需(daily)，绝不压减基本生活开支硬凑目标；需改预算时调用 propose_budget_change 生成确认卡片。
+        4. 输出风格（极其重要）：
+           - 严禁使用任何 Markdown 语法（禁止出现 **、*、###、---、表格、代码块或反引号）。
+           - 全文控制在 180 字以内，手机小屏一眼看完，不写寒暄、不解释调用了什么工具。
+           - 固定 3 段纯文本结构：
+             第 1 行：一句话结论（直接回答能不能/有多少/需注意什么）。
+             中间：最多 3 条要点，用「1. 」「2. 」「3. 」开头，每条不超过 1 句话，只保留关键金额。
+             最后 1 行：1 句可执行下一步建议（若已生成预算建议卡片，提醒用户点击卡片确认）。
     """.trimIndent()
 
     suspend fun testConnection(config: ApiConfig): Result<String> {
@@ -220,7 +224,7 @@ class EasySpendAiService(
                 }
                 if (contentText.isNotBlank()) {
                     finalText = contentText
-                    onPartialText(finalText)
+                    onPartialText(formatConciseReply(finalText))
                 }
 
                 val toolCalls = msg.optJSONArray("tool_calls")
@@ -265,7 +269,7 @@ class EasySpendAiService(
             }
         }
 
-        val resolvedText = finalText.trim().ifBlank {
+        val resolvedText = formatConciseReply(finalText).ifBlank {
             "已完成 ${traces.size} 项账本核对，请查看下方工具依据与调整建议。"
         }
         return AgentChatReply(text = resolvedText, toolTraces = traces, proposals = proposals)
@@ -352,7 +356,7 @@ class EasySpendAiService(
 
                 if (textBuffer.isNotBlank()) {
                     finalText = textBuffer.toString()
-                    onPartialText(finalText)
+                    onPartialText(formatConciseReply(finalText))
                 }
 
                 if (functionCalls.isEmpty()) {
@@ -391,7 +395,7 @@ class EasySpendAiService(
             }
         }
 
-        val resolvedText = finalText.trim().ifBlank {
+        val resolvedText = formatConciseReply(finalText).ifBlank {
             "已完成 ${traces.size} 项账本核对，请查看下方工具依据与调整建议。"
         }
         return AgentChatReply(text = resolvedText, toolTraces = traces, proposals = proposals)
@@ -754,6 +758,28 @@ class EasySpendAiService(
     companion object {
         private const val TAG = "EasySpendAiService"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        fun formatConciseReply(raw: String): String {
+            if (raw.isBlank()) return ""
+            val cleanedLines = raw
+                .replace("\r\n", "\n")
+                .replace(Regex("```[a-zA-Z]*\\n?"), "")
+                .replace("```", "")
+                .lines()
+                .mapNotNull { original ->
+                    var line = original.trim()
+                    if (line.matches(Regex("^[-=*_]{3,}$"))) return@mapNotNull null
+                    line = line.replace(Regex("^#{1,6}\\s*"), "")
+                    line = line.replace(Regex("^>\\s*"), "")
+                    line = line.replace(Regex("^[-*]\\s+"), "• ")
+                    line = line.replace("**", "").replace("__", "").replace("`", "")
+                    line.trimEnd()
+                }
+            return cleanedLines
+                .joinToString("\n")
+                .replace(Regex("\n{3,}"), "\n\n")
+                .trim()
+        }
 
         private val defaultHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
