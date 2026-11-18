@@ -109,15 +109,15 @@ val NumericLargeStyle = TextStyle(
 val NumericMediumStyle = TextStyle(
     fontFamily = JetBrainsMonoFontFamily,
     fontWeight = FontWeight.SemiBold,
-    fontSize = 18.sp,
-    lineHeight = 24.sp,
+    fontSize = 16.sp,
+    lineHeight = 22.sp,
     fontFeatureSettings = "tnum"
 )
 
 val NumericSmallStyle = TextStyle(
     fontFamily = JetBrainsMonoFontFamily,
     fontWeight = FontWeight.Medium,
-    fontSize = 14.sp,
+    fontSize = 13.sp,
     lineHeight = 18.sp,
     fontFeatureSettings = "tnum"
 )

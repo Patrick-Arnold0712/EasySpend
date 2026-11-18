@@ -47,7 +47,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.finance.CategoryBudgetStatus
 import com.example.domain.finance.MoneyFormatter
 import com.example.ui.AiInsightState
@@ -66,6 +69,7 @@ fun BudgetAndInsightsScreen(
     onApplyProposal: (String, Long) -> Unit,
     onUpdateSavingsGoal: (String, String, String) -> Unit,
     onGenerateAiInsights: () -> Unit,
+    onOpenApiSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val summary = state.summary
@@ -115,9 +119,12 @@ fun BudgetAndInsightsScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
                                 Text("挑战存下", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(
                                     MoneyFormatter.formatFen(summary?.savingsTargetFen ?: 100000L),
@@ -125,10 +132,16 @@ fun BudgetAndInsightsScreen(
                                 )
                             }
                             Column(
+                                modifier = Modifier.weight(1.3f),
                                 horizontalAlignment = Alignment.End,
                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                Text("预计月底结余（仅计已到账）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "预计月底结余（仅计已到账）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.End
+                                )
                                 val proj = summary?.projectedMonthEndSavingsFen ?: 0L
                                 Text(
                                     MoneyFormatter.formatFen(proj),
@@ -182,6 +195,9 @@ fun BudgetAndInsightsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -191,6 +207,7 @@ fun BudgetAndInsightsScreen(
                             Button(
                                 onClick = onGenerateAiInsights,
                                 enabled = state.aiInsightState !is AiInsightState.Loading,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                 modifier = Modifier.testTag("generate_ai_insights_button")
                             ) {
                                 if (state.aiInsightState is AiInsightState.Loading) {
@@ -200,7 +217,7 @@ fun BudgetAndInsightsScreen(
                                         strokeWidth = 2.dp
                                     )
                                 } else {
-                                    Text("生成分析")
+                                    Text("生成分析", fontSize = 13.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -212,6 +229,14 @@ fun BudgetAndInsightsScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (!state.settings.isApiConfigured) {
+                                    TextButton(
+                                        onClick = onOpenApiSettings,
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("先配置大模型 API Key")
+                                    }
+                                }
                             }
                             AiInsightState.Loading -> {
                                 Text(
@@ -226,12 +251,21 @@ fun BudgetAndInsightsScreen(
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = insight.message,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = semantic.danger,
-                                        modifier = Modifier.padding(10.dp)
-                                    )
+                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = insight.message,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = semantic.danger
+                                        )
+                                        if (!state.settings.isApiConfigured) {
+                                            TextButton(
+                                                onClick = onOpenApiSettings,
+                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                            ) {
+                                                Text("去填写 API Key")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             is AiInsightState.Success -> {
@@ -369,10 +403,19 @@ fun BudgetAndInsightsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(status.categoryName, style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    status.categoryName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
                                 Surface(
                                     color = if (status.isEssential) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                                     shape = RoundedCornerShape(6.dp)
@@ -381,6 +424,7 @@ fun BudgetAndInsightsScreen(
                                         text = if (status.isEssential) "必要保障" else "可调弹性",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (status.isEssential) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -388,7 +432,8 @@ fun BudgetAndInsightsScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "${MoneyFormatter.formatFen(status.spentFen)} / ${MoneyFormatter.formatFen(status.limitFen)}",
-                                    style = NumericSmallStyle
+                                    style = NumericSmallStyle,
+                                    maxLines = 1
                                 )
                                 IconButton(
                                     onClick = { editingCategory = status },
@@ -401,17 +446,20 @@ fun BudgetAndInsightsScreen(
                         BudgetProgressBar(status = status)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = "还剩 ${MoneyFormatter.formatFen(status.remainingFen)}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (status.remainingFen < 0) semantic.danger else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (status.remainingFen < 0) semantic.danger else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
                             )
                             Text(
                                 text = "月底预计 ${MoneyFormatter.formatFen(status.projectedEndOfMonthFen)} · ${status.riskLevel.label}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = riskLevelColor(status.riskLevel)
+                                color = riskLevelColor(status.riskLevel),
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1.4f)
                             )
                         }
                     }

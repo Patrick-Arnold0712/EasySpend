@@ -9,11 +9,13 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.EasySpendDatabase
@@ -397,8 +399,9 @@ class PaymentCaptureVerificationTest {
             .assertIsDisplayed()
             .performClick()
         assertTrue(simulateCalled)
+        composeRule.onNodeWithTag("import_review_lazy_list")
+            .performScrollToNode(hasTestTag("candidate_card_99"))
         composeRule.onNodeWithTag("candidate_card_99")
-            .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText("美团外卖")
             .performScrollTo()

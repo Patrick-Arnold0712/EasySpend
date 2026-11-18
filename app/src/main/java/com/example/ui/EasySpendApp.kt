@@ -66,6 +66,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.R
 import com.example.data.local.ThemeMode
 import com.example.ui.screens.AgentScreen
+import com.example.ui.screens.ApiConfigDialog
 import com.example.ui.screens.BudgetAndInsightsScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.SettingsAndAuditDialog
@@ -129,6 +130,7 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
 
         val snackbarHostState = remember { SnackbarHostState() }
         var showSettings by remember { mutableStateOf(false) }
+        var showApiConfigDialog by remember { mutableStateOf(false) }
         var ledgerInitialTab by remember { mutableIntStateOf(0) }
         var agentPrefillPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -327,7 +329,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                 onUpdateBudgetLimit = { catId, limitStr -> viewModel.updateBudgetLimit(catId, limitStr) },
                                 onApplyProposal = { catId, fen -> viewModel.applyDeterministicProposal(catId, fen) },
                                 onUpdateSavingsGoal = { t, a, p -> viewModel.updateSavingsGoal(t, a, p) },
-                                onGenerateAiInsights = { viewModel.generateAiInsights() }
+                                onGenerateAiInsights = { viewModel.generateAiInsights() },
+                                onOpenApiSettings = { showApiConfigDialog = true }
                             )
                         }
                         composable(ROUTE_AGENT) {
@@ -337,7 +340,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                 onClearPrefill = { agentPrefillPrompt = null },
                                 onSendMessage = { viewModel.sendAgentMessage(it) },
                                 onConfirmProposal = { msgId, prop -> viewModel.confirmAgentProposal(msgId, prop) },
-                                onRejectProposal = { msgId, prop -> viewModel.rejectAgentProposal(msgId, prop) }
+                                onRejectProposal = { msgId, prop -> viewModel.rejectAgentProposal(msgId, prop) },
+                                onOpenApiSettings = { showApiConfigDialog = true }
                             )
                         }
                     }
@@ -350,7 +354,20 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     onSelectThemeMode = { viewModel.setThemeMode(it) },
                     onToggleAiCloud = { viewModel.setAiCloudAnalysisEnabled(it) },
                     onSetDailyReviewTime = { h, m -> viewModel.setDailyReviewTime(h, m) },
+                    onSaveApiConfig = { p, url, key, model -> viewModel.saveApiConfig(p, url, key, model) },
+                    onTestApiConnection = { p, url, key, model -> viewModel.testApiConnection(p, url, key, model) },
+                    onClearApiTestFeedback = { viewModel.clearApiTestFeedback() },
                     onDismiss = { showSettings = false }
+                )
+            }
+
+            if (showApiConfigDialog) {
+                ApiConfigDialog(
+                    state = state,
+                    onSaveApiConfig = { p, url, key, model -> viewModel.saveApiConfig(p, url, key, model) },
+                    onTestApiConnection = { p, url, key, model -> viewModel.testApiConnection(p, url, key, model) },
+                    onClearFeedback = { viewModel.clearApiTestFeedback() },
+                    onDismiss = { showApiConfigDialog = false }
                 )
             }
         }

@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
 import com.example.ui.theme.NumericSmallStyle
@@ -88,7 +89,12 @@ fun MonthlyCategoryBreakdownCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
                         text = "$monthKey 月度分类消费分布",
                         style = MaterialTheme.typography.titleMedium
@@ -134,7 +140,7 @@ fun MonthlyCategoryBreakdownCard(
                     },
                     modifier = Modifier.testTag("chart_mode_donut")
                 ) {
-                    Text("占比环形图", maxLines = 1)
+                    Text("占比环形图", maxLines = 1, fontSize = 13.sp)
                 }
                 SegmentedButton(
                     selected = chartMode == 1,
@@ -149,7 +155,7 @@ fun MonthlyCategoryBreakdownCard(
                     },
                     modifier = Modifier.testTag("chart_mode_bar")
                 ) {
-                    Text("预算对比柱图", maxLines = 1)
+                    Text("预算对比柱图", maxLines = 1, fontSize = 13.sp)
                 }
             }
 

@@ -7,11 +7,15 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AgentChatReply
+import com.example.ai.ApiConfig
+import com.example.ai.ConversationTurn
 import com.example.ai.EasySpendAiService
 import com.example.ai.PendingBudgetProposal
 import com.example.ai.ProposalStatus
 import com.example.ai.SpendingInsightReport
 import com.example.ai.ToolExecutionResult
+import com.example.ai.toApiConfig
+import com.example.data.local.ApiProviderType
 import com.example.data.local.EasySpendDatabase
 import com.example.data.local.ThemeMode
 import com.example.data.local.UserSettings
@@ -32,8 +36,6 @@ import com.example.data.repository.EasySpendRepository
 import com.example.domain.finance.BudgetAndForecastEngine
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
-import com.google.firebase.ai.type.Content
-import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -67,6 +69,12 @@ data class AgentChatMessage(
     val isError: Boolean = false
 )
 
+data class ApiTestFeedback(
+    val isTesting: Boolean = false,
+    val message: String? = null,
+    val isSuccess: Boolean = false
+)
+
 data class EasySpendUiState(
     val settings: UserSettings = UserSettings(),
     val categories: List<CategoryEntity> = emptyList(),
@@ -85,9 +93,10 @@ data class EasySpendUiState(
     val agentMessages: List<AgentChatMessage> = listOf(
         AgentChatMessage(
             isUser = false,
-            text = "你好，我是你的易支道财务助手。你可以直接问我本月还能存多少钱、哪些花销容易超支，或让我帮你算一算怎么调整弹性预算。试试点下面的快捷问题："
+            text = "你好，我是你的易支道财务助手。你可以直接问我本月还能存多少钱、哪些花销容易超支，或让我帮你算一算怎么调整弹性预算。配置好上方 API Key 后即可随时对话："
         )
     ),
+    val apiTestFeedback: ApiTestFeedback = ApiTestFeedback(),
     val bannerMessage: String? = null
 )
 
@@ -104,9 +113,10 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     private val _agentProgressText = MutableStateFlow<String?>(null)
     private val _streamingAgentText = MutableStateFlow("")
     private val _agentMessages = MutableStateFlow(EasySpendUiState().agentMessages)
+    private val _apiTestFeedback = MutableStateFlow(ApiTestFeedback())
     private val _bannerMessage = MutableStateFlow<String?>(null)
 
-    private val conversationHistory = mutableListOf<Content>()
+    private val conversationHistory = mutableListOf<ConversationTurn>()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val monthDataFlow = settingsStore.settingsFlow.flatMapLatest { settings ->
@@ -133,6 +143,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _agentProgressText,
         _streamingAgentText,
         _agentMessages,
+        _apiTestFeedback,
         _bannerMessage
     ) { values ->
         val settings = values[0] as UserSettings
@@ -155,7 +166,8 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         val streamingText = values[11] as String
         @Suppress("UNCHECKED_CAST")
         val messages = values[12] as List<AgentChatMessage>
-        val banner = values[13] as String?
+        val apiTest = values[13] as ApiTestFeedback
+        val banner = values[14] as String?
 
         EasySpendUiState(
             settings = settings,
@@ -173,6 +185,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             agentProgressText = progressText,
             streamingAgentText = streamingText,
             agentMessages = messages,
+            apiTestFeedback = apiTest,
             bannerMessage = banner
         )
     }.stateIn(
@@ -317,6 +330,11 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             _bannerMessage.value = "当前已关闭云端 AI 分析授权，请先在右上角设置中开启后再使用 AI 预分类。"
             return
         }
+        val apiConfig = state.settings.toApiConfig()
+        if (!apiConfig.isValid) {
+            _bannerMessage.value = "请先在右上角设置中填写模型 API Key，再使用 AI 智能预分类。"
+            return
+        }
         val pending = state.pendingCandidates
         if (pending.isEmpty()) {
             _bannerMessage.value = "待核对队列为空，无需 AI 预分类。"
@@ -325,7 +343,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isAiClassifying.value = true
             try {
-                val suggestions = aiService.suggestCategoriesForCandidates(pending, state.categories)
+                val suggestions = aiService.suggestCategoriesForCandidates(pending, state.categories, apiConfig)
                 for (s in suggestions) {
                     repository.updateCandidateSuggestion(
                         candidateId = s.candidateId,
@@ -335,7 +353,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                         note = "AI 预分类建议（${(s.confidence * 100).toInt()}%）：${s.reason}"
                     )
                 }
-                _bannerMessage.value = "Gemini 已完成 ${suggestions.size} 条待确认交易的智能预分类，请您最终确认。"
+                _bannerMessage.value = "${apiConfig.model} 已完成 ${suggestions.size} 条待确认交易的智能预分类，请您最终确认。"
             } catch (e: TimeoutCancellationException) {
                 _bannerMessage.value = "AI 预分类请求超时（60秒），请稍后重试。"
             } catch (e: CancellationException) {
@@ -430,13 +448,18 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     fun generateAiInsights() {
         val state = uiState.value
         if (!state.settings.aiCloudAnalysisEnabled) {
-            _aiInsightState.value = AiInsightState.Error("当前已关闭云端 AI 分析授权，请在设置中开启「允许发送脱敏财务摘要至 Gemini」后再生成洞察。")
+            _aiInsightState.value = AiInsightState.Error("当前已关闭云端 AI 分析授权，请在设置中开启「允许 AI 分析脱敏账单」后再生成洞察。")
+            return
+        }
+        val apiConfig = state.settings.toApiConfig()
+        if (!apiConfig.isValid) {
+            _aiInsightState.value = AiInsightState.Error("尚未配置模型 API Key，请点击右上角设置图标填写 API Key、Base URL 与模型名称。")
             return
         }
         viewModelScope.launch {
             _aiInsightState.value = AiInsightState.Loading
             try {
-                val report = aiService.generateSpendingInsights(state.settings.activeMonthKey)
+                val report = aiService.generateSpendingInsights(state.settings.activeMonthKey, apiConfig)
                 _aiInsightState.value = AiInsightState.Success(report)
             } catch (e: TimeoutCancellationException) {
                 _aiInsightState.value = AiInsightState.Error("AI 消费分析超时（60秒），请检查网络后重试。")
@@ -460,7 +483,19 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             _agentMessages.update {
                 it + AgentChatMessage(isUser = true, text = trimmed) + AgentChatMessage(
                     isUser = false,
-                    text = "已拦截请求：您当前关闭了云端 AI 模型授权（安全隐私保护）。如需使用 Gemini 财务 Agent 进行自然语言问答，请点击右上角设置开启「允许脱敏财务摘要分析」。",
+                    text = "已拦截请求：您当前关闭了云端 AI 模型授权。如需使用财务助手，请点击右上角设置开启「允许 AI 分析脱敏账单」。",
+                    isError = true
+                )
+            }
+            return
+        }
+
+        val apiConfig = state.settings.toApiConfig()
+        if (!apiConfig.isValid) {
+            _agentMessages.update {
+                it + AgentChatMessage(isUser = true, text = trimmed) + AgentChatMessage(
+                    isUser = false,
+                    text = "尚未填写模型 API Key，暂时无法调用云端大模型。请点击上方「配置 API」填写 DeepSeek / 通义千问 / Gemini / OpenAI 兼容接口密钥后立即提问。",
                     isError = true
                 )
             }
@@ -470,18 +505,19 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _agentMessages.update { it + AgentChatMessage(isUser = true, text = trimmed) }
         viewModelScope.launch {
             _isAgentResponding.value = true
-            _agentProgressText.value = "正在向 Gemini 发送请求并规划工具调用..."
+            _agentProgressText.value = "正在连接 ${apiConfig.model} 并规划查账工具..."
             _streamingAgentText.value = ""
             try {
                 val reply: AgentChatReply = aiService.askFinancialAgent(
                     userPrompt = trimmed,
                     monthKey = state.settings.activeMonthKey,
+                    config = apiConfig,
                     conversationHistory = conversationHistory.toList(),
                     onProgress = { step -> _agentProgressText.value = step },
                     onPartialText = { partial -> _streamingAgentText.value = partial }
                 )
-                conversationHistory.add(content("user") { text(trimmed) })
-                conversationHistory.add(content("model") { text(reply.text) })
+                conversationHistory.add(ConversationTurn("user", trimmed))
+                conversationHistory.add(ConversationTurn("assistant", reply.text))
 
                 _agentMessages.update {
                     it + AgentChatMessage(
@@ -495,7 +531,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                 _agentMessages.update {
                     it + AgentChatMessage(
                         isUser = false,
-                        text = "Agent 单轮响应超时（60秒），请检查网络后重试。",
+                        text = "Agent 单轮响应超时（65秒），请检查网络或 API 地址是否可达。",
                         isError = true
                     )
                 }
@@ -506,7 +542,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                 _agentMessages.update {
                     it + AgentChatMessage(
                         isUser = false,
-                        text = "Agent 调用出错：${e.localizedMessage ?: "请检查网络或 Firebase App Check 配置"}",
+                        text = "Agent 调用出错：${e.localizedMessage ?: "请检查 API Key、Base URL 或网络连接"}",
                         isError = true
                     )
                 }
@@ -581,6 +617,46 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleDarkMode(currentlyDark: Boolean) {
         val next = if (currentlyDark) ThemeMode.LIGHT else ThemeMode.DARK
         setThemeMode(next)
+    }
+
+    fun saveApiConfig(
+        provider: ApiProviderType,
+        baseUrl: String,
+        apiKey: String,
+        model: String
+    ) {
+        viewModelScope.launch {
+            settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
+            _apiTestFeedback.value = ApiTestFeedback()
+            _bannerMessage.value = "已保存 ${provider.label}（$model）API 配置。"
+        }
+    }
+
+    fun testApiConnection(
+        provider: ApiProviderType,
+        baseUrl: String,
+        apiKey: String,
+        model: String
+    ) {
+        viewModelScope.launch {
+            _apiTestFeedback.value = ApiTestFeedback(isTesting = true, message = "正在测试接口连通性...")
+            val cfg = ApiConfig(provider, baseUrl.trim(), apiKey.trim(), model.trim())
+            val res = aiService.testConnection(cfg)
+            res.onSuccess { msg ->
+                settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
+                _apiTestFeedback.value = ApiTestFeedback(isTesting = false, message = msg, isSuccess = true)
+            }.onFailure { err ->
+                _apiTestFeedback.value = ApiTestFeedback(
+                    isTesting = false,
+                    message = err.localizedMessage ?: "连接失败，请核对 Key 与地址",
+                    isSuccess = false
+                )
+            }
+        }
+    }
+
+    fun clearApiTestFeedback() {
+        _apiTestFeedback.value = ApiTestFeedback()
     }
 
     private fun decodeStatementBytes(bytes: ByteArray): String {

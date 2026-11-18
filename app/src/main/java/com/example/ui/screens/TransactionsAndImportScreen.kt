@@ -75,7 +75,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -175,7 +177,9 @@ fun TransactionsAndImportScreen(
 
             if (selectedTab == 0) {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("import_review_lazy_list"),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -199,6 +203,7 @@ fun TransactionsAndImportScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val splitBtnPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -208,26 +213,28 @@ fun TransactionsAndImportScreen(
                                             pendingChannelPicker = PaymentChannel.WECHAT_PAY
                                             csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*"))
                                         },
+                                        contentPadding = splitBtnPadding,
                                         modifier = Modifier
                                             .weight(1f)
                                             .testTag("import_wechat_csv_button")
                                     ) {
                                         Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("微信账单", maxLines = 1)
+                                        Text("微信账单", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     }
                                     FilledTonalButton(
                                         onClick = {
                                             pendingChannelPicker = PaymentChannel.ALIPAY
                                             csvLauncher.launch(arrayOf("text/*", "application/csv", "*/*"))
                                         },
+                                        contentPadding = splitBtnPadding,
                                         modifier = Modifier
                                             .weight(1f)
                                             .testTag("import_alipay_csv_button")
                                     ) {
                                         Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("支付宝账单", maxLines = 1)
+                                        Text("支付宝账单", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     }
                                 }
                                 Row(
@@ -236,21 +243,23 @@ fun TransactionsAndImportScreen(
                                 ) {
                                     OutlinedButton(
                                         onClick = onLoadDemoQueue,
+                                        contentPadding = splitBtnPadding,
                                         modifier = Modifier
                                             .weight(1f)
                                             .testTag("load_demo_csv_queue_button")
                                     ) {
-                                        Text("载入演示账单", maxLines = 1)
+                                        Text("载入演示账单", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     }
                                     OutlinedButton(
                                         onClick = { onSimulateNotification(true) },
+                                        contentPadding = splitBtnPadding,
                                         modifier = Modifier
                                             .weight(1f)
                                             .testTag("simulate_wechat_notif_button")
                                     ) {
                                         Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("模拟通知记账", maxLines = 1)
+                                        Text("模拟通知记账", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     }
                                 }
                                 Surface(
@@ -294,6 +303,7 @@ fun TransactionsAndImportScreen(
 
                     if (state.pendingCandidates.isNotEmpty()) {
                         item {
+                            val batchBtnPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -301,6 +311,7 @@ fun TransactionsAndImportScreen(
                                 FilledTonalButton(
                                     onClick = onRunAiBatchClassify,
                                     enabled = !state.isAiClassifying,
+                                    contentPadding = batchBtnPadding,
                                     modifier = Modifier
                                         .weight(1f)
                                         .testTag("ai_batch_classify_button")
@@ -308,22 +319,23 @@ fun TransactionsAndImportScreen(
                                     if (state.isAiClassifying) {
                                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                         Spacer(Modifier.width(6.dp))
-                                        Text("AI 分类中...")
+                                        Text("AI 分类中...", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     } else {
                                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("AI 帮我预分类", maxLines = 1)
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("AI 帮我预分类", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                     }
                                 }
                                 Button(
                                     onClick = onConfirmAllClean,
+                                    contentPadding = batchBtnPadding,
                                     modifier = Modifier
                                         .weight(1f)
                                         .testTag("confirm_all_clean_button")
                                 ) {
                                     Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("一键确认清晰项", maxLines = 1)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("一键确认清晰项", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                                 }
                             }
                         }

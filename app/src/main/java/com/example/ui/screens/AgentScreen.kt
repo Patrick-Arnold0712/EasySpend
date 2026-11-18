@@ -27,18 +27,21 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.ai.PendingBudgetProposal
@@ -68,6 +72,7 @@ fun AgentScreen(
     onSendMessage: (String) -> Unit,
     onConfirmProposal: (String, PendingBudgetProposal) -> Unit,
     onRejectProposal: (String, PendingBudgetProposal) -> Unit,
+    onOpenApiSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
@@ -100,6 +105,80 @@ fun AgentScreen(
                 .widthIn(max = 640.dp)
                 .fillMaxSize()
         ) {
+            // API Key status / quick setup bar
+            Surface(
+                color = if (state.settings.isApiConfigured) {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                } else {
+                    semantic.warningContainer
+                },
+                shape = RoundedCornerShape(14.dp),
+                border = semantic.cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("agent_api_status_banner")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = if (state.settings.isApiConfigured) MaterialTheme.colorScheme.primary else semantic.warning,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column {
+                            Text(
+                                text = if (state.settings.isApiConfigured) {
+                                    "已接入 ${state.settings.apiProvider.label} · ${state.settings.apiModel}"
+                                } else {
+                                    "请先配置大模型 API Key"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (state.settings.isApiConfigured) {
+                                    "支持随时切换 DeepSeek / 通义千问 / Gemini / OpenAI"
+                                } else {
+                                    "填写个人 API Key 后即可在手机直接调用财务助手"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (state.settings.isApiConfigured) {
+                        TextButton(
+                            onClick = onOpenApiSettings,
+                            modifier = Modifier.testTag("open_api_config_button")
+                        ) {
+                            Text("配置 API")
+                        }
+                    } else {
+                        FilledTonalButton(
+                            onClick = onOpenApiSettings,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("open_api_config_button")
+                        ) {
+                            Text("去配置")
+                        }
+                    }
+                }
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier

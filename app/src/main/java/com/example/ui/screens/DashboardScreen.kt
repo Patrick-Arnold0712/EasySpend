@@ -48,7 +48,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.OverspendRiskLevel
 import com.example.ui.EasySpendUiState
@@ -79,7 +82,8 @@ fun DashboardScreen(
         LazyColumn(
             modifier = Modifier
                 .widthIn(max = 640.dp)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .testTag("dashboard_lazy_list"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -102,7 +106,12 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Text(
                                     text = "${state.settings.activeMonthKey} 本月可用结余",
                                     style = MaterialTheme.typography.labelLarge,
@@ -119,20 +128,21 @@ fun DashboardScreen(
                                 shape = RoundedCornerShape(20.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Savings,
                                         contentDescription = null,
                                         tint = semantic.heroTextPrimary,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(15.dp)
                                     )
                                     Text(
                                         text = if (summary?.isSavingsTargetFeasible == true) "存钱目标稳步达成" else "存钱目标需留意",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = semantic.heroTextPrimary
+                                        color = semantic.heroTextPrimary,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -142,25 +152,28 @@ fun DashboardScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             HeroMetricItem(
                                 label = "家庭生活费",
                                 value = MoneyFormatter.formatFen(summary?.livingAllowanceIncomeFen ?: 0L),
                                 labelColor = semantic.heroTextSecondary,
-                                valueColor = semantic.heroTextPrimary
+                                valueColor = semantic.heroTextPrimary,
+                                modifier = Modifier.weight(1f)
                             )
                             HeroMetricItem(
                                 label = "兼职已到账",
                                 value = MoneyFormatter.formatFen(summary?.partTimeIncomeFen ?: 0L),
                                 labelColor = semantic.heroTextSecondary,
-                                valueColor = semantic.heroTextPrimary
+                                valueColor = semantic.heroTextPrimary,
+                                modifier = Modifier.weight(1f)
                             )
                             HeroMetricItem(
                                 label = "本月净支出",
                                 value = MoneyFormatter.formatFen(summary?.netExpenseFen ?: 0L),
                                 labelColor = semantic.heroTextSecondary,
-                                valueColor = semantic.heroTextPrimary
+                                valueColor = semantic.heroTextPrimary,
+                                modifier = Modifier.weight(1f)
                             )
                         }
 
@@ -265,25 +278,28 @@ fun DashboardScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        val compactButtonPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilledTonalButton(
                                 onClick = onLoadDemoBaseline,
+                                contentPadding = compactButtonPadding,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("demo_load_baseline_button")
                             ) {
-                                Text("载入体验账单", maxLines = 1)
+                                Text("载入体验账单", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                             }
                             OutlinedButton(
                                 onClick = onLoadDemoQueue,
+                                contentPadding = compactButtonPadding,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("demo_load_queue_button")
                             ) {
-                                Text("体验核对流程", maxLines = 1)
+                                Text("体验核对流程", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                             }
                         }
                         Row(
@@ -292,25 +308,27 @@ fun DashboardScreen(
                         ) {
                             OutlinedButton(
                                 onClick = onAdd300Essential,
+                                contentPadding = compactButtonPadding,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("demo_add_300_button")
                             ) {
-                                Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("记¥300学习费", maxLines = 1)
+                                Text("记¥300学习费", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                             }
                             Button(
                                 onClick = {
                                     onNavigateToAgentWithPrompt("结合当前最新账本，我这个月还能存下1000元吗？如果需要调整预算，请给出具体方案。")
                                 },
+                                contentPadding = compactButtonPadding,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("demo_ask_agent_button")
                             ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("问问财务助手", maxLines = 1)
+                                Text("问问财务助手", fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
                             }
                         }
                     }
@@ -329,11 +347,7 @@ fun DashboardScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = "本月花在哪儿",
                                 style = MaterialTheme.typography.titleMedium
@@ -389,12 +403,18 @@ fun DashboardScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Text(
                                             text = st.categoryName,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (st.isEssential) {
                                             Surface(
@@ -405,6 +425,7 @@ fun DashboardScreen(
                                                     text = "必要",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    maxLines = 1,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                 )
                                             }
@@ -446,18 +467,24 @@ private fun HeroMetricItem(
     label: String,
     value: String,
     labelColor: Color,
-    valueColor: Color
+    valueColor: Color,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = labelColor
+            color = labelColor,
+            maxLines = 1
         )
         Text(
             text = value,
             style = NumericMediumStyle,
-            color = valueColor
+            color = valueColor,
+            maxLines = 1
         )
     }
 }

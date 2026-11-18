@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.finance.CategoryBudgetStatus
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.OverspendRiskLevel
@@ -121,15 +122,15 @@ fun CategoryDonutChart(
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(
-            modifier = Modifier.size(136.dp),
+            modifier = Modifier.size(116.dp),
             contentAlignment = Alignment.Center
         ) {
             Canvas(
                 modifier = Modifier
-                    .size(126.dp)
+                    .size(110.dp)
                     .testTag("donut_canvas")
                     .then(
                         if (onSelectCategory != null && active.isNotEmpty()) {
@@ -159,8 +160,8 @@ fun CategoryDonutChart(
                         } else Modifier
                     )
             ) {
-                val baseStroke = 16.dp.toPx()
-                val activeStroke = 21.dp.toPx()
+                val baseStroke = 14.dp.toPx()
+                val activeStroke = 18.dp.toPx()
                 val maxStroke = activeStroke
                 val arcSize = Size(size.width - maxStroke, size.height - maxStroke)
                 val topLeft = Offset(maxStroke / 2f, maxStroke / 2f)
@@ -204,7 +205,7 @@ fun CategoryDonutChart(
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(horizontal = 8.dp)
+                modifier = Modifier.padding(horizontal = 10.dp)
             ) {
                 if (selectedItem != null) {
                     val pct = ((selectedItem.spentFen * 100) / totalSpent).toInt()
@@ -217,24 +218,28 @@ fun CategoryDonutChart(
                     )
                     Text(
                         text = MoneyFormatter.formatFen(selectedItem.spentFen),
-                        style = NumericSmallStyle.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = NumericSmallStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                     Text(
                         text = "占 $pct%",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
                 } else {
                     Text(
                         text = "本月已花",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
                     Text(
                         text = MoneyFormatter.formatFen(netExpenseFen),
-                        style = NumericSmallStyle.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = NumericSmallStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                 }
             }
@@ -242,7 +247,7 @@ fun CategoryDonutChart(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             if (active.isEmpty()) {
                 Text(
@@ -258,7 +263,7 @@ fun CategoryDonutChart(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
                     } else Color.Transparent
 
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
@@ -273,34 +278,52 @@ fun CategoryDonutChart(
                                 } else Modifier
                             )
                             .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Box(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(palette[idx % palette.size])
-                            )
-                            Spacer(Modifier.width(6.dp))
+                                    .weight(1f)
+                                    .padding(end = 6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(palette[idx % palette.size])
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = item.categoryName,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Text(
-                                text = item.categoryName,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                text = "$pct%",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
                                 ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                         Text(
-                            text = "${MoneyFormatter.formatFen(item.spentFen)} ($pct%)",
-                            style = NumericSmallStyle,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            text = MoneyFormatter.formatFen(item.spentFen),
+                            style = NumericSmallStyle.copy(fontSize = 12.sp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 14.dp)
                         )
                     }
                 }
@@ -358,6 +381,9 @@ fun CategorySpendingBarChart(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -371,7 +397,7 @@ fun CategorySpendingBarChart(
                             .clip(RoundedCornerShape(3.dp))
                             .background(MaterialTheme.colorScheme.primary)
                     )
-                    Text("已花费", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("已花费", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -382,13 +408,14 @@ fun CategorySpendingBarChart(
                             .size(2.dp, 10.dp)
                             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                     )
-                    Text("预算参考线", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("预算参考线", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
             Text(
-                text = "刻度上限 ${MoneyFormatter.formatFen(maxScaleFen)}",
+                text = "上限 ${MoneyFormatter.formatFen(maxScaleFen)}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
             )
         }
 
@@ -425,6 +452,9 @@ fun CategorySpendingBarChart(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -439,7 +469,10 @@ fun CategorySpendingBarChart(
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             ),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Surface(
                             color = if (status.isEssential) {
@@ -457,6 +490,7 @@ fun CategorySpendingBarChart(
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                             )
                         }
@@ -471,7 +505,8 @@ fun CategorySpendingBarChart(
                             semantic.danger
                         } else {
                             MaterialTheme.colorScheme.onSurface
-                        }
+                        },
+                        maxLines = 1
                     )
                 }
 
@@ -566,17 +601,20 @@ fun EssentialVsFlexibleRatioBar(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 text = "必要支出 ${MoneyFormatter.formatFen(essentialFen)} ($essentialPct%)",
                 style = MaterialTheme.typography.labelMedium,
-                color = primaryColor
+                color = primaryColor,
+                modifier = Modifier.weight(1f)
             )
             Text(
                 text = "弹性支出 ${MoneyFormatter.formatFen(flexibleFen)} ($flexiblePct%)",
                 style = MaterialTheme.typography.labelMedium,
-                color = secondaryColor
+                color = secondaryColor,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f)
             )
         }
         Canvas(
