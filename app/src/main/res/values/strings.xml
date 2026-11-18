@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">易支道</string>
+    <string name="notification_listener_label">易支道支付通知辅助记账</string>
+    <string name="nav_dashboard">总览</string>
+    <string name="nav_ledger">记账</string>
+    <string name="nav_budget">预算</string>
+    <string name="nav_agent">助手</string>
+    <string name="cd_add_transaction">记一笔</string>
+    <string name="cd_settings">偏好设置</string>
+    <string name="cd_toggle_theme">切换深浅色模式</string>
+    <string name="cd_send_message">发送消息</string>
+    <string name="cd_close">关闭</string>
+</resources>

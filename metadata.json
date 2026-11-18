@@ -1,0 +1,6 @@
+{
+  "name": "易支道",
+  "description": "面向大学生的个人财务管理与智能预算规划 Agent（EasySpend），支持本地账本、智能分类、预算预测与 AI 财务决策辅助。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
