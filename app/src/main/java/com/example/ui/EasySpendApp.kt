@@ -4,6 +4,17 @@ import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,11 +66,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -69,6 +84,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
 import com.example.data.local.ThemeMode
+import com.example.ui.motion.EasySpendMotion
 import com.example.ui.screens.AccountManagementDialog
 import com.example.ui.screens.AgentScreen
 import com.example.ui.screens.ApiConfigDialog
@@ -101,6 +117,14 @@ private val destinations = listOf(
     NavDestination(ROUTE_AGENT, R.string.nav_agent, Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_agent")
 )
 
+private fun routeIndex(route: String?): Int = when (route) {
+    ROUTE_DASHBOARD -> 0
+    ROUTE_LEDGER -> 1
+    ROUTE_BUDGET -> 2
+    ROUTE_AGENT -> 3
+    else -> 0
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
@@ -113,6 +137,7 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
     }
 
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     DisposableEffect(darkTheme) {
         val activity = context as? ComponentActivity
         activity?.enableEdgeToEdge(
@@ -175,6 +200,11 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
 
         val pendingCount = state.pendingCandidates.size
         val semantic = MaterialTheme.semanticColors
+        val themeIconRotation by animateFloatAsState(
+            targetValue = if (darkTheme) 180f else 0f,
+            animationSpec = EasySpendMotion.FluidSpring,
+            label = "themeIconSpin"
+        )
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useNavRail = maxWidth >= 700.dp
@@ -187,20 +217,34 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     Column {
                         TopAppBar(
                             title = {
-                                Text(
-                                    text = when (currentRoute) {
-                                        ROUTE_LEDGER -> "记账与核对"
-                                        ROUTE_BUDGET -> "预算与分析"
-                                        ROUTE_AGENT -> "财务助手"
-                                        else -> "易支道 · ${currentAccount.displayLabel}"
+                                val titleText = when (currentRoute) {
+                                    ROUTE_LEDGER -> "记账与核对"
+                                    ROUTE_BUDGET -> "预算与分析"
+                                    ROUTE_AGENT -> "财务助手"
+                                    else -> "易支道 · ${currentAccount.displayLabel}"
+                                }
+                                AnimatedContent(
+                                    targetState = titleText,
+                                    transitionSpec = {
+                                        (fadeIn(tween(180)) + slideInVertically(tween(200)) { it / 3 }) togetherWith
+                                            (fadeOut(tween(120)) + slideOutVertically(tween(140)) { -it / 3 })
                                     },
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                                    maxLines = 1
-                                )
+                                    label = "topBarTitleTransition"
+                                ) { label ->
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             },
                             actions = {
                                 IconButton(
-                                    onClick = { showAccountManager = true },
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showAccountManager = true
+                                    },
                                     modifier = Modifier.testTag("account_button")
                                 ) {
                                     Icon(
@@ -209,16 +253,23 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                     )
                                 }
                                 IconButton(
-                                    onClick = { viewModel.toggleDarkMode(darkTheme) },
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        viewModel.toggleDarkMode(darkTheme)
+                                    },
                                     modifier = Modifier.testTag("theme_toggle_button")
                                 ) {
                                     Icon(
                                         imageVector = if (darkTheme) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
-                                        contentDescription = stringResource(R.string.cd_toggle_theme)
+                                        contentDescription = stringResource(R.string.cd_toggle_theme),
+                                        modifier = Modifier.graphicsLayer { rotationZ = themeIconRotation }
                                     )
                                 }
                                 IconButton(
-                                    onClick = { showSettings = true },
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showSettings = true
+                                    },
                                     modifier = Modifier.testTag("settings_button")
                                 ) {
                                     Icon(
@@ -233,22 +284,30 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                 actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
-                        HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+                        HorizontalDivider(thickness = 0.75.dp, color = semantic.hairline)
                     }
                 },
                 bottomBar = {
                     if (!useNavRail) {
                         Column {
-                            HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+                            HorizontalDivider(thickness = 0.75.dp, color = semantic.hairline)
                             NavigationBar(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 tonalElevation = 0.dp
                             ) {
                                 destinations.forEach { dest ->
                                     val selected = currentRoute == dest.route
+                                    val iconScale by animateFloatAsState(
+                                        targetValue = if (selected) 1.12f else 1f,
+                                        animationSpec = EasySpendMotion.BouncySpring,
+                                        label = "navIconScale_${dest.route}"
+                                    )
                                     NavigationBarItem(
                                         selected = selected,
                                         onClick = {
+                                            if (!selected) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
                                             navController.navigate(dest.route) {
                                                 popUpTo(ROUTE_DASHBOARD) { saveState = true }
                                                 launchSingleTop = true
@@ -257,15 +316,25 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                         },
                                         icon = {
                                             val icon = if (selected) dest.selectedIcon else dest.unselectedIcon
+                                            val scaleMod = Modifier.graphicsLayer {
+                                                scaleX = iconScale
+                                                scaleY = iconScale
+                                            }
                                             if (dest.route == ROUTE_LEDGER && pendingCount > 0) {
                                                 BadgedBox(badge = { Badge { Text(pendingCount.toString()) } }) {
-                                                    Icon(icon, contentDescription = null)
+                                                    Icon(icon, contentDescription = null, modifier = scaleMod)
                                                 }
                                             } else {
-                                                Icon(icon, contentDescription = null)
+                                                Icon(icon, contentDescription = null, modifier = scaleMod)
                                             }
                                         },
-                                        label = { Text(stringResource(dest.labelRes), maxLines = 1) },
+                                        label = {
+                                            Text(
+                                                text = stringResource(dest.labelRes),
+                                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                maxLines = 1
+                                            )
+                                        },
                                         colors = NavigationBarItemDefaults.colors(
                                             selectedIconColor = MaterialTheme.colorScheme.primary,
                                             selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -319,6 +388,23 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     NavHost(
                         navController = navController,
                         startDestination = ROUTE_DASHBOARD,
+                        enterTransition = {
+                            val dir = if (routeIndex(targetState.destination.route) >= routeIndex(initialState.destination.route)) 1 else -1
+                            slideInHorizontally(tween(230)) { it / 10 * dir } +
+                                fadeIn(tween(210)) +
+                                scaleIn(initialScale = 0.988f, animationSpec = tween(220))
+                        },
+                        exitTransition = {
+                            val dir = if (routeIndex(targetState.destination.route) >= routeIndex(initialState.destination.route)) 1 else -1
+                            slideOutHorizontally(tween(190)) { -it / 12 * dir } +
+                                fadeOut(tween(150))
+                        },
+                        popEnterTransition = {
+                            slideInHorizontally(tween(220)) { -it / 10 } + fadeIn(tween(200))
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(tween(180)) { it / 12 } + fadeOut(tween(140))
+                        },
                         modifier = Modifier.weight(1f)
                     ) {
                         composable(ROUTE_DASHBOARD) {

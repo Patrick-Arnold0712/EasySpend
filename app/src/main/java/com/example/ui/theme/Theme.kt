@@ -31,13 +31,16 @@ data class EasySpendSemanticColors(
     val trackBackground: Color,
     val heroStart: Color,
     val heroEnd: Color,
+    val heroGlowPrimary: Color,
+    val heroGlowAccent: Color,
+    val heroRimHighlight: Color,
     val heroTextPrimary: Color,
     val heroTextSecondary: Color,
     val heroDivider: Color,
     val heroPillBackground: Color
 ) {
     val cardBorder: BorderStroke
-        get() = BorderStroke(0.5.dp, hairline)
+        get() = BorderStroke(0.75.dp, hairline)
 }
 
 private val LightSemanticColors = EasySpendSemanticColors(
@@ -49,13 +52,16 @@ private val LightSemanticColors = EasySpendSemanticColors(
     danger = AlertRed,
     dangerContainer = AlertRedContainer,
     hairline = OutlineSubtle,
-    trackBackground = Color(0xFFE5E5EA),
-    heroStart = Color(0xFF1F745E),
-    heroEnd = Color(0xFF2C8F74),
+    trackBackground = Color(0xFFE3E7E5),
+    heroStart = Color(0xFF0C4E3E),
+    heroEnd = Color(0xFF16745B),
+    heroGlowPrimary = Color(0xFF45E0B0).copy(alpha = 0.24f),
+    heroGlowAccent = Color(0xFFF6D58E).copy(alpha = 0.16f),
+    heroRimHighlight = Color.White.copy(alpha = 0.26f),
     heroTextPrimary = Color.White,
-    heroTextSecondary = Color(0xFFD5F2E8),
-    heroDivider = Color.White.copy(alpha = 0.18f),
-    heroPillBackground = Color.White.copy(alpha = 0.16f)
+    heroTextSecondary = Color(0xFFD0F0E4),
+    heroDivider = Color.White.copy(alpha = 0.16f),
+    heroPillBackground = Color.White.copy(alpha = 0.14f)
 )
 
 private val DarkSemanticColors = EasySpendSemanticColors(
@@ -67,13 +73,16 @@ private val DarkSemanticColors = EasySpendSemanticColors(
     danger = AlertRedDark,
     dangerContainer = AlertRedContainerDark,
     hairline = DarkOutline,
-    trackBackground = Color(0xFF32323A),
-    heroStart = Color(0xFF19352E),
-    heroEnd = Color(0xFF21463C),
-    heroTextPrimary = Color(0xFFF2F7F5),
-    heroTextSecondary = Color(0xFFB5D8CC),
-    heroDivider = Color.White.copy(alpha = 0.12f),
-    heroPillBackground = Color.White.copy(alpha = 0.10f)
+    trackBackground = Color(0xFF263039),
+    heroStart = Color(0xFF0D2620),
+    heroEnd = Color(0xFF153B31),
+    heroGlowPrimary = Color(0xFF3DE0A8).copy(alpha = 0.18f),
+    heroGlowAccent = Color(0xFF60A5FA).copy(alpha = 0.12f),
+    heroRimHighlight = Color(0xFF7BEAC3).copy(alpha = 0.22f),
+    heroTextPrimary = Color(0xFFF2F8F6),
+    heroTextSecondary = Color(0xFFAAD6C7),
+    heroDivider = Color.White.copy(alpha = 0.10f),
+    heroPillBackground = Color.White.copy(alpha = 0.09f)
 )
 
 val LocalEasySpendColors = staticCompositionLocalOf { LightSemanticColors }
@@ -137,9 +146,9 @@ private val LightColorScheme = lightColorScheme(
 )
 
 val EasySpendShapes = Shapes(
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
     extraLarge = RoundedCornerShape(26.dp)
 )
 

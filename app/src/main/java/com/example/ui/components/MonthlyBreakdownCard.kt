@@ -1,12 +1,17 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -15,11 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,9 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
+import com.example.ui.motion.AnimatedMoneyText
+import com.example.ui.motion.FluidSegmentOption
+import com.example.ui.motion.FluidSegmentedBar
+import com.example.ui.motion.SpringAnimatedVisibility
 import com.example.ui.theme.NumericSmallStyle
 import com.example.ui.theme.semanticColors
 
@@ -78,11 +82,12 @@ fun MonthlyCategoryBreakdownCard(
             .testTag("monthly_breakdown_card"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = semantic.cardBorder,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.large
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -107,13 +112,13 @@ fun MonthlyCategoryBreakdownCard(
                 }
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(
-                        text = MoneyFormatter.formatFen(filteredTotalFen),
+                    AnimatedMoneyText(
+                        amountFen = filteredTotalFen,
                         style = NumericSmallStyle.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -125,39 +130,15 @@ fun MonthlyCategoryBreakdownCard(
                 )
             }
 
-            // Chart Mode Switcher: Donut vs Bar Comparison
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                SegmentedButton(
-                    selected = chartMode == 0,
-                    onClick = { chartMode = 0 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    icon = {
-                        Icon(
-                            Icons.Default.DonutLarge,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    modifier = Modifier.testTag("chart_mode_donut")
-                ) {
-                    Text("占比环形图", maxLines = 1, fontSize = 13.sp)
-                }
-                SegmentedButton(
-                    selected = chartMode == 1,
-                    onClick = { chartMode = 1 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    icon = {
-                        Icon(
-                            Icons.Default.BarChart,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    modifier = Modifier.testTag("chart_mode_bar")
-                ) {
-                    Text("预算对比柱图", maxLines = 1, fontSize = 13.sp)
-                }
-            }
+            // Fluid Sliding Pill Mode Switcher: Donut vs Bar Comparison
+            FluidSegmentedBar(
+                options = listOf(
+                    FluidSegmentOption("占比环形图", "chart_mode_donut", Icons.Default.DonutLarge),
+                    FluidSegmentOption("预算对比柱图", "chart_mode_bar", Icons.Default.BarChart)
+                ),
+                selectedIndex = chartMode,
+                onSelect = { chartMode = it }
+            )
 
             // Spending Group Filter
             Row(
@@ -177,24 +158,34 @@ fun MonthlyCategoryBreakdownCard(
                 }
             }
 
-            HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+            HorizontalDivider(thickness = 0.75.dp, color = semantic.hairline)
 
-            if (chartMode == 0) {
-                CategoryDonutChart(
-                    statuses = filteredStatuses,
-                    netExpenseFen = filteredTotalFen,
-                    selectedCategoryId = selectedCategoryId,
-                    onSelectCategory = { selectedCategoryId = it }
-                )
-            } else {
-                CategorySpendingBarChart(
-                    statuses = filteredStatuses,
-                    selectedCategoryId = selectedCategoryId,
-                    onSelectCategory = { selectedCategoryId = it }
-                )
+            AnimatedContent(
+                targetState = chartMode,
+                transitionSpec = {
+                    val dir = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(tween(220)) { it / 6 * dir } + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(180)) { -it / 6 * dir } + fadeOut(tween(150)))
+                },
+                label = "chartModeMorph"
+            ) { mode ->
+                if (mode == 0) {
+                    CategoryDonutChart(
+                        statuses = filteredStatuses,
+                        netExpenseFen = filteredTotalFen,
+                        selectedCategoryId = selectedCategoryId,
+                        onSelectCategory = { selectedCategoryId = it }
+                    )
+                } else {
+                    CategorySpendingBarChart(
+                        statuses = filteredStatuses,
+                        selectedCategoryId = selectedCategoryId,
+                        onSelectCategory = { selectedCategoryId = it }
+                    )
+                }
             }
 
-            AnimatedVisibility(visible = selectedStatus != null) {
+            SpringAnimatedVisibility(visible = selectedStatus != null) {
                 selectedStatus?.let { st ->
                     val sharePct = if (filteredTotalFen > 0L) ((st.spentFen * 100) / filteredTotalFen).toInt() else 0
                     val diffLabel = if (st.remainingFen >= 0L) {
@@ -204,7 +195,8 @@ fun MonthlyCategoryBreakdownCard(
                     }
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = semantic.cardBorder,
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("chart_selected_detail")

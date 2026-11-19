@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +32,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,6 +63,10 @@ import com.example.ui.EasySpendUiState
 import com.example.ui.components.BudgetProgressBar
 import com.example.ui.components.MonthlyCategoryBreakdownCard
 import com.example.ui.components.riskLevelColor
+import com.example.ui.motion.AgentThinkingPulse
+import com.example.ui.motion.AnimatedMoneyText
+import com.example.ui.motion.StaggeredEntrance
+import com.example.ui.motion.TonalIconBadge
 import com.example.ui.theme.NumericMediumStyle
 import com.example.ui.theme.NumericSmallStyle
 import com.example.ui.theme.semanticColors
@@ -88,83 +96,93 @@ fun BudgetAndInsightsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // 1. Monthly Savings Challenge Card
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = semantic.cardBorder,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+            item(key = "savings_goal_card") {
+                StaggeredEntrance(index = 0) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = semantic.cardBorder,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = MaterialTheme.shapes.large
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    TonalIconBadge(
+                                        icon = Icons.Default.Savings,
+                                        size = 36.dp,
+                                        iconSize = 19.dp
+                                    )
+                                    Text("本月存钱小目标", style = MaterialTheme.typography.titleMedium)
+                                }
+                                OutlinedButton(
+                                    onClick = { showGoalDialog = true },
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.testTag("edit_savings_goal_button")
+                                ) {
+                                    Text("修改目标", fontSize = 13.sp)
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Default.Savings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Text("本月存钱小目标", style = MaterialTheme.typography.titleMedium)
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text("挑战存下", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    AnimatedMoneyText(
+                                        amountFen = summary?.savingsTargetFen ?: 100000L,
+                                        style = NumericMediumStyle.copy(fontSize = 19.sp),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1.3f),
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        "预计月底结余（仅计已到账）",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.End
+                                    )
+                                    val proj = summary?.projectedMonthEndSavingsFen ?: 0L
+                                    AnimatedMoneyText(
+                                        amountFen = proj,
+                                        style = NumericMediumStyle.copy(fontSize = 19.sp),
+                                        color = if (summary?.isSavingsTargetFeasible == true) semantic.safe else semantic.warning
+                                    )
+                                }
                             }
-                            OutlinedButton(
-                                onClick = { showGoalDialog = true },
-                                modifier = Modifier.testTag("edit_savings_goal_button")
-                            ) {
-                                Text("修改目标")
-                            }
-                        }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text("挑战存下", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    MoneyFormatter.formatFen(summary?.savingsTargetFen ?: 100000L),
-                                    style = NumericMediumStyle
-                                )
-                            }
-                            Column(
-                                modifier = Modifier.weight(1.3f),
-                                horizontalAlignment = Alignment.End,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    "预计月底结余（仅计已到账）",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.End
-                                )
-                                val proj = summary?.projectedMonthEndSavingsFen ?: 0L
-                                Text(
-                                    MoneyFormatter.formatFen(proj),
-                                    style = NumericMediumStyle,
-                                    color = if (summary?.isSavingsTargetFeasible == true) semantic.safe else semantic.warning
-                                )
-                            }
-                        }
-
-                        if (summary != null) {
-                            Surface(
-                                color = if (summary.isSavingsTargetFeasible) semantic.safeContainer else semantic.warningContainer,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = summary.savingsFeasibilityNote,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(12.dp)
-                                )
+                            if (summary != null) {
+                                Surface(
+                                    color = if (summary.isSavingsTargetFeasible) semantic.safeContainer else semantic.warningContainer,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = summary.savingsFeasibilityNote,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -172,146 +190,166 @@ fun BudgetAndInsightsScreen(
             }
 
             // 2. Monthly Spending Category Visualization Card
-            item {
-                MonthlyCategoryBreakdownCard(
-                    monthKey = state.settings.activeMonthKey,
-                    summary = summary
-                )
+            item(key = "monthly_breakdown") {
+                StaggeredEntrance(index = 1) {
+                    MonthlyCategoryBreakdownCard(
+                        monthKey = state.settings.activeMonthKey,
+                        summary = summary
+                    )
+                }
             }
 
             // 3. AI Spending Analysis Card
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = semantic.cardBorder,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+            item(key = "ai_insights_card") {
+                StaggeredEntrance(index = 2) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = semantic.cardBorder,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = MaterialTheme.shapes.large
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Text("AI 消费分析与省钱建议", style = MaterialTheme.typography.titleMedium)
-                            }
-                            Button(
-                                onClick = onGenerateAiInsights,
-                                enabled = state.aiInsightState !is AiInsightState.Loading,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                modifier = Modifier.testTag("generate_ai_insights_button")
-                            ) {
-                                if (state.aiInsightState is AiInsightState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.dp
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    TonalIconBadge(
+                                        icon = Icons.Default.AutoAwesome,
+                                        size = 36.dp,
+                                        iconSize = 18.dp
                                     )
-                                } else {
-                                    Text("生成分析", fontSize = 13.sp, maxLines = 1)
+                                    Text("AI 消费分析与省钱建议", style = MaterialTheme.typography.titleMedium)
                                 }
-                            }
-                        }
-
-                        when (val insight = state.aiInsightState) {
-                            AiInsightState.Idle -> {
-                                Text(
-                                    text = "点击「生成分析」，AI 会根据你本月的实际花销给出消费趋势小结、冲动提醒和三条省钱小建议。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                if (!state.settings.isApiConfigured) {
-                                    TextButton(
-                                        onClick = onOpenApiSettings,
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("先配置大模型 API Key")
+                                Button(
+                                    onClick = onGenerateAiInsights,
+                                    enabled = state.aiInsightState !is AiInsightState.Loading,
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                    modifier = Modifier.testTag("generate_ai_insights_button")
+                                ) {
+                                    if (state.aiInsightState is AiInsightState.Loading) {
+                                        AgentThinkingPulse(color = MaterialTheme.colorScheme.onPrimary)
+                                    } else {
+                                        Text("生成分析", fontSize = 13.sp, maxLines = 1)
                                     }
                                 }
                             }
-                            AiInsightState.Loading -> {
-                                Text(
-                                    text = "正在分析你的本月账本与花销节奏...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            is AiInsightState.Error -> {
-                                Surface(
-                                    color = semantic.dangerContainer,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(
-                                            text = insight.message,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = semantic.danger
-                                        )
-                                        if (!state.settings.isApiConfigured) {
-                                            TextButton(
-                                                onClick = onOpenApiSettings,
-                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                            ) {
-                                                Text("去填写 API Key")
+
+                            AnimatedContent(
+                                targetState = state.aiInsightState,
+                                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+                                label = "aiInsightContentState"
+                            ) { insight ->
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    when (insight) {
+                                        AiInsightState.Idle -> {
+                                            Text(
+                                                text = "点击「生成分析」，AI 会根据你本月的实际花销给出消费趋势小结、冲动提醒和三条省钱小建议。",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (!state.settings.isApiConfigured) {
+                                                TextButton(
+                                                    onClick = onOpenApiSettings,
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("先配置大模型 API Key")
+                                                }
                                             }
                                         }
-                                    }
-                                }
-                            }
-                            is AiInsightState.Success -> {
-                                val r = insight.report
-                                Text(
-                                    text = r.headline,
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(text = r.trendSummary, style = MaterialTheme.typography.bodySmall)
-                                if (r.impulseAlert.isNotBlank()) {
-                                    Surface(
-                                        color = semantic.warningContainer,
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = "留意项：${r.impulseAlert}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.padding(10.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = "存钱评估：${r.savingsVerdict}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-                                r.recommendations.forEachIndexed { idx, rec ->
-                                    Row(
-                                        verticalAlignment = Alignment.Top,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Lightbulb,
-                                            contentDescription = null,
-                                            tint = semantic.warning,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "${idx + 1}. $rec",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                        AiInsightState.Loading -> {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                AgentThinkingPulse(color = MaterialTheme.colorScheme.primary)
+                                                Text(
+                                                    text = "正在分析你的本月账本与花销节奏...",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                        is AiInsightState.Error -> {
+                                            Surface(
+                                                color = semantic.dangerContainer,
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Text(
+                                                        text = insight.message,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = semantic.danger
+                                                    )
+                                                    if (!state.settings.isApiConfigured) {
+                                                        TextButton(
+                                                            onClick = onOpenApiSettings,
+                                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                                        ) {
+                                                            Text("去填写 API Key")
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        is AiInsightState.Success -> {
+                                            val r = insight.report
+                                            Text(
+                                                text = r.headline,
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(text = r.trendSummary, style = MaterialTheme.typography.bodySmall)
+                                            if (r.impulseAlert.isNotBlank()) {
+                                                Surface(
+                                                    color = semantic.warningContainer,
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text(
+                                                        text = "留意项：${r.impulseAlert}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        modifier = Modifier.padding(10.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = "存钱评估：${r.savingsVerdict}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            HorizontalDivider(thickness = 0.75.dp, color = semantic.hairline)
+                                            r.recommendations.forEachIndexed { idx, rec ->
+                                                Row(
+                                                    verticalAlignment = Alignment.Top,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Lightbulb,
+                                                        contentDescription = null,
+                                                        tint = semantic.warning,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Text(
+                                                        text = "${idx + 1}. $rec",
+                                                        style = MaterialTheme.typography.bodySmall
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -320,14 +358,15 @@ fun BudgetAndInsightsScreen(
                 }
             }
 
-            // 3. Budget Adjustment Suggestions
+            // 4. Budget Adjustment Suggestions
             if (summary != null && summary.suggestedAdjustments.isNotEmpty()) {
-                item {
+                item(key = "budget_suggestions") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                         border = semantic.cardBorder,
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = MaterialTheme.shapes.large
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -343,7 +382,8 @@ fun BudgetAndInsightsScreen(
                             summary.suggestedAdjustments.forEach { prop ->
                                 Surface(
                                     color = MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(12.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = semantic.cardBorder,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -367,6 +407,7 @@ fun BudgetAndInsightsScreen(
                                         Spacer(Modifier.width(8.dp))
                                         FilledTonalButton(
                                             onClick = { onApplyProposal(prop.categoryId, prop.proposedLimitFen) },
+                                            shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.testTag("apply_proposal_${prop.categoryId}")
                                         ) {
                                             Text("应用")
@@ -379,8 +420,8 @@ fun BudgetAndInsightsScreen(
                 }
             }
 
-            // 4. Category Budgets & Custom Categories
-            item {
+            // 5. Category Budgets & Custom Categories
+            item(key = "category_budget_header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -397,6 +438,7 @@ fun BudgetAndInsightsScreen(
                     )
                     FilledTonalButton(
                         onClick = onOpenCategoryManager,
+                        shape = RoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier.testTag("open_category_manager_button")
                     ) {
@@ -409,14 +451,17 @@ fun BudgetAndInsightsScreen(
 
             items(summary?.categoryStatuses.orEmpty(), key = { it.categoryId }) { status ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateItem(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = semantic.cardBorder,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    shape = MaterialTheme.shapes.large
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(9.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -432,7 +477,7 @@ fun BudgetAndInsightsScreen(
                             ) {
                                 Text(
                                     status.categoryName,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f, fill = false)
@@ -504,6 +549,7 @@ fun BudgetAndInsightsScreen(
                     label = { Text("预算上限（元）") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("budget_limit_input")
@@ -515,6 +561,7 @@ fun BudgetAndInsightsScreen(
                         onUpdateBudgetLimit(cat.categoryId, limitText)
                         editingCategory = null
                     },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("save_budget_limit_button")
                 ) {
                     Text("保存")
@@ -543,21 +590,24 @@ fun BudgetAndInsightsScreen(
                         onValueChange = { targetStr = it },
                         label = { Text("每月想存下多少钱（元）") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
                     OutlinedTextField(
                         value = allowanceStr,
                         onValueChange = { allowanceStr = it },
                         label = { Text("每月家庭生活费（元）") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
                     OutlinedTextField(
                         value = partTimeStr,
                         onValueChange = { partTimeStr = it },
                         label = { Text("预计兼职参考（到账后才计入结余）") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
                 }
             },
@@ -566,7 +616,8 @@ fun BudgetAndInsightsScreen(
                     onClick = {
                         onUpdateSavingsGoal(targetStr, allowanceStr, partTimeStr)
                         showGoalDialog = false
-                    }
+                    },
+                    shape = RoundedCornerShape(12.dp)
                 ) { Text("保存") }
             },
             dismissButton = {

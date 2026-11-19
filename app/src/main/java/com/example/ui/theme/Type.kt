@@ -101,8 +101,9 @@ val Typography = Typography(
 val NumericLargeStyle = TextStyle(
     fontFamily = JetBrainsMonoFontFamily,
     fontWeight = FontWeight.Bold,
-    fontSize = 28.sp,
-    lineHeight = 34.sp,
+    fontSize = 33.sp,
+    lineHeight = 39.sp,
+    letterSpacing = (-0.8).sp,
     fontFeatureSettings = "tnum"
 )
 
@@ -111,6 +112,7 @@ val NumericMediumStyle = TextStyle(
     fontWeight = FontWeight.SemiBold,
     fontSize = 16.sp,
     lineHeight = 22.sp,
+    letterSpacing = (-0.2).sp,
     fontFeatureSettings = "tnum"
 )
 

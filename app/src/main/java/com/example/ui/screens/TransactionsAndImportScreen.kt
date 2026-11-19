@@ -56,9 +56,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,6 +76,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -96,6 +100,10 @@ import com.example.domain.finance.MoneyFormatter
 import com.example.service.PaymentNotificationListenerService
 import com.example.ui.EasySpendUiState
 import com.example.ui.components.EmptyStateCard
+import com.example.ui.motion.FluidSegmentOption
+import com.example.ui.motion.FluidSegmentedBar
+import com.example.ui.motion.LiveStatusDot
+import com.example.ui.motion.SpringAnimatedVisibility
 import com.example.ui.theme.NumericSmallStyle
 import com.example.ui.theme.semanticColors
 
@@ -159,30 +167,27 @@ fun TransactionsAndImportScreen(
                 .widthIn(max = 640.dp)
                 .fillMaxSize()
         ) {
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                SegmentedButton(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    modifier = Modifier.testTag("tab_import_review")
-                ) {
-                    Text("待核对 (${state.pendingCandidates.size})")
-                }
-                SegmentedButton(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    modifier = Modifier.testTag("tab_formal_ledger")
-                ) {
-                    Text("已入账 (${state.transactions.size})")
-                }
-            }
+            FluidSegmentedBar(
+                options = listOf(
+                    FluidSegmentOption("待核对 (${state.pendingCandidates.size})", "tab_import_review"),
+                    FluidSegmentOption("已入账 (${state.transactions.size})", "tab_formal_ledger")
+                ),
+                selectedIndex = selectedTab,
+                onSelect = { selectedTab = it },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
 
-            if (selectedTab == 0) {
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    val dir = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(tween(220)) { it / 8 * dir } + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(180)) { -it / 8 * dir } + fadeOut(tween(140)))
+                },
+                modifier = Modifier.weight(1f),
+                label = "ledgerTabTransition"
+            ) { activeTab ->
+            if (activeTab == 0) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -298,8 +303,16 @@ fun TransactionsAndImportScreen(
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
+                                            LiveStatusDot(
+                                                color = when {
+                                                    !listenerEnabled -> MaterialTheme.colorScheme.outline
+                                                    listenerBound -> semantic.safe
+                                                    else -> semantic.warning
+                                                },
+                                                size = 8.dp
+                                            )
                                             val statusText = when {
                                                 !listenerEnabled -> "通知自动抓账：未授权（可先点上方模拟体验）"
                                                 listenerBound -> "通知自动抓账：已开启（实时在线 · 支持连刷多条）"
@@ -334,7 +347,8 @@ fun TransactionsAndImportScreen(
                                             }
                                         }
 
-                                        if (showCaptureDiagnostics) {
+                                        SpringAnimatedVisibility(visible = showCaptureDiagnostics) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                             Text(
                                                 text = "微信自动扣款 / 饭堂多窗口连刷防漏抓建议：\n" +
@@ -380,6 +394,7 @@ fun TransactionsAndImportScreen(
                                                         )
                                                     }
                                                 }
+                                            }
                                             }
                                         }
                                     }
@@ -443,7 +458,8 @@ fun TransactionsAndImportScreen(
                                 categories = state.categories,
                                 categoryMap = categoryMap,
                                 onConfirm = onConfirmCandidate,
-                                onSkipOrDismiss = onSkipOrDismissCandidate
+                                onSkipOrDismiss = onSkipOrDismissCandidate,
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }
@@ -516,11 +532,13 @@ fun TransactionsAndImportScreen(
                                 tx = tx,
                                 categoryName = catName,
                                 onEdit = { editingTx = tx },
-                                onDelete = { onDeleteTx(tx.id) }
+                                onDelete = { onDeleteTx(tx.id) },
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }
                 }
+            }
             }
         }
 
@@ -528,6 +546,7 @@ fun TransactionsAndImportScreen(
             onClick = { showManualDialog = true },
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
+            shape = RoundedCornerShape(18.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
@@ -572,7 +591,8 @@ private fun CandidateReviewCard(
     categories: List<CategoryEntity>,
     categoryMap: Map<String, CategoryEntity>,
     onConfirm: (Long, String, FundingSource, Boolean, String) -> Unit,
-    onSkipOrDismiss: (Long, CandidateResolution) -> Unit
+    onSkipOrDismiss: (Long, CandidateResolution) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val semantic = MaterialTheme.semanticColors
     var selectedCategoryId by remember(candidate.id, candidate.suggestedCategoryId) {
@@ -598,9 +618,10 @@ private fun CandidateReviewCard(
     }
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("candidate_card_${candidate.id}"),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = semantic.cardBorder,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -782,13 +803,15 @@ private fun TransactionLedgerCard(
     tx: TransactionEntity,
     categoryName: String,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val semantic = MaterialTheme.semanticColors
     val isInflow = tx.direction == TransactionDirection.INCOME || tx.direction == TransactionDirection.REFUND
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = semantic.cardBorder,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)

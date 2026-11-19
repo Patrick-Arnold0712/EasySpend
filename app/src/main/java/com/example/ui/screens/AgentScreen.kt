@@ -1,7 +1,11 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,14 +29,12 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -50,6 +52,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +66,11 @@ import com.example.ai.ToolExecutionResult
 import com.example.domain.finance.MoneyFormatter
 import com.example.ui.AgentChatMessage
 import com.example.ui.EasySpendUiState
+import com.example.ui.motion.AgentThinkingPulse
+import com.example.ui.motion.EasySpendMotion
+import com.example.ui.motion.SpringAnimatedVisibility
+import com.example.ui.motion.TonalIconBadge
+import com.example.ui.motion.springClickable
 import com.example.ui.theme.semanticColors
 
 @Composable
@@ -112,11 +121,11 @@ fun AgentScreen(
                 } else {
                     semantic.warningContainer
                 },
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = semantic.cardBorder,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
                     .testTag("agent_api_status_banner")
             ) {
                 Row(
@@ -128,14 +137,19 @@ fun AgentScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = null,
-                            tint = if (state.settings.isApiConfigured) MaterialTheme.colorScheme.primary else semantic.warning,
-                            modifier = Modifier.size(18.dp)
+                        TonalIconBadge(
+                            icon = Icons.Default.Key,
+                            containerColor = if (state.settings.isApiConfigured) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                semantic.warning.copy(alpha = 0.16f)
+                            },
+                            iconTint = if (state.settings.isApiConfigured) MaterialTheme.colorScheme.primary else semantic.warning,
+                            size = 34.dp,
+                            iconSize = 17.dp
                         )
                         Column {
                             Text(
@@ -171,6 +185,7 @@ fun AgentScreen(
                     } else {
                         FilledTonalButton(
                             onClick = onOpenApiSettings,
+                            shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             modifier = Modifier.testTag("open_api_config_button")
                         ) {
@@ -184,24 +199,25 @@ fun AgentScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(state.agentMessages, key = { it.id }) { msg ->
                     AgentMessageBubble(
                         message = msg,
                         onConfirmProposal = { prop -> onConfirmProposal(msg.id, prop) },
-                        onRejectProposal = { prop -> onRejectProposal(msg.id, prop) }
+                        onRejectProposal = { prop -> onRejectProposal(msg.id, prop) },
+                        modifier = Modifier.animateItem()
                     )
                 }
                 if (state.isAgentResponding) {
-                    item {
+                    item(key = "agent_responding_indicator") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (state.streamingAgentText.isNotBlank()) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                                     border = semantic.cardBorder,
-                                    shape = RoundedCornerShape(18.dp),
+                                    shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp),
                                     modifier = Modifier.widthIn(max = 520.dp)
                                 ) {
                                     Text(
@@ -217,7 +233,7 @@ fun AgentScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.padding(vertical = 4.dp)
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                AgentThinkingPulse(color = MaterialTheme.colorScheme.primary)
                                 Text(
                                     text = state.agentProgressText ?: "助手正在核对账本与预算...",
                                     style = MaterialTheme.typography.bodySmall,
@@ -241,6 +257,7 @@ fun AgentScreen(
                     AssistChip(
                         onClick = { onSendMessage(prompt) },
                         label = { Text(prompt) },
+                        shape = RoundedCornerShape(12.dp),
                         enabled = !state.isAgentResponding,
                         modifier = Modifier.testTag("agent_quick_prompt_$idx")
                     )
@@ -260,7 +277,7 @@ fun AgentScreen(
                     onValueChange = { inputText = it },
                     placeholder = { Text("问问预算、存钱计划或花销分析...") },
                     maxLines = 3,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(18.dp),
                     modifier = Modifier
                         .weight(1f)
                         .testTag("agent_input_field")
@@ -274,6 +291,7 @@ fun AgentScreen(
                         }
                     },
                     enabled = inputText.isNotBlank() && !state.isAgentResponding,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .size(48.dp)
                         .testTag("agent_send_button")
@@ -292,12 +310,18 @@ fun AgentScreen(
 private fun AgentMessageBubble(
     message: AgentChatMessage,
     onConfirmProposal: (PendingBudgetProposal) -> Unit,
-    onRejectProposal: (PendingBudgetProposal) -> Unit
+    onRejectProposal: (PendingBudgetProposal) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val semantic = MaterialTheme.semanticColors
+    val bubbleShape = if (message.isUser) {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
+    } else {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
+    }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -308,7 +332,7 @@ private fun AgentMessageBubble(
                 else -> MaterialTheme.colorScheme.surfaceContainerLow
             },
             border = if (message.isUser || message.isError) null else semantic.cardBorder,
-            shape = RoundedCornerShape(18.dp),
+            shape = bubbleShape,
             modifier = Modifier.widthIn(max = 520.dp)
         ) {
             Text(
@@ -319,7 +343,7 @@ private fun AgentMessageBubble(
                     message.isError -> semantic.danger
                     else -> MaterialTheme.colorScheme.onSurface
                 },
-                modifier = Modifier.padding(14.dp)
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp)
             )
         }
 
@@ -341,16 +365,23 @@ private fun AgentMessageBubble(
 private fun ToolTraceAccordion(traces: List<ToolExecutionResult>) {
     var expanded by remember { mutableStateOf(false) }
     val semantic = MaterialTheme.semanticColors
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = EasySpendMotion.SnappySpring,
+        label = "traceChevronRotation"
+    )
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded },
+            .clip(MaterialTheme.shapes.medium)
+            .springClickable(pressedScale = 0.988f) { expanded = !expanded },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = semantic.cardBorder,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.medium
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -374,13 +405,15 @@ private fun ToolTraceAccordion(traces: List<ToolExecutionResult>) {
                     )
                 }
                 Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    imageVector = Icons.Default.ExpandMore,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer { rotationZ = chevronRotation },
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            AnimatedVisibility(visible = expanded) {
+            SpringAnimatedVisibility(visible = expanded) {
                 Column(
                     modifier = Modifier.padding(top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -389,9 +422,10 @@ private fun ToolTraceAccordion(traces: List<ToolExecutionResult>) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(10.dp),
+                            border = semantic.cardBorder,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
+                            Column(modifier = Modifier.padding(9.dp)) {
                                 Text(
                                     text = "${t.toolName}(${t.argumentsJson})",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
@@ -424,10 +458,11 @@ private fun BudgetProposalConfirmationCard(
             .testTag("proposal_card_${proposal.categoryId}"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
         border = semantic.cardBorder,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.large
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
@@ -444,47 +479,55 @@ private fun BudgetProposalConfirmationCard(
                 style = MaterialTheme.typography.bodySmall
             )
 
-            when (proposal.status) {
-                ProposalStatus.PENDING -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onReject,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("reject_proposal_${proposal.categoryId}")
+            AnimatedContent(
+                targetState = proposal.status,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+                label = "proposalStatusTransition"
+            ) { status ->
+                when (status) {
+                    ProposalStatus.PENDING -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("暂不调整")
-                        }
-                        Button(
-                            onClick = onConfirm,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("confirm_proposal_${proposal.categoryId}")
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("确认调整")
+                            OutlinedButton(
+                                onClick = onReject,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reject_proposal_${proposal.categoryId}")
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("暂不调整")
+                            }
+                            Button(
+                                onClick = onConfirm,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("confirm_proposal_${proposal.categoryId}")
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("确认调整")
+                            }
                         }
                     }
-                }
-                ProposalStatus.CONFIRMED -> {
-                    Text(
-                        text = "✓ 已按你的确认更新此预算",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = semantic.safe
-                    )
-                }
-                ProposalStatus.REJECTED -> {
-                    Text(
-                        text = "已保留原有预算不变",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    ProposalStatus.CONFIRMED -> {
+                        Text(
+                            text = "✓ 已按你的确认更新此预算",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = semantic.safe
+                        )
+                    }
+                    ProposalStatus.REJECTED -> {
+                        Text(
+                            text = "已保留原有预算不变",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
