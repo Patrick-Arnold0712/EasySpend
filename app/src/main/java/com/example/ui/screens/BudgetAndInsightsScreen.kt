@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Savings
@@ -70,6 +71,7 @@ fun BudgetAndInsightsScreen(
     onUpdateSavingsGoal: (String, String, String) -> Unit,
     onGenerateAiInsights: () -> Unit,
     onOpenApiSettings: () -> Unit = {},
+    onOpenCategoryManager: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val summary = state.summary
@@ -377,13 +379,32 @@ fun BudgetAndInsightsScreen(
                 }
             }
 
-            // 4. Category Budgets
+            // 4. Category Budgets & Custom Categories
             item {
-                Text(
-                    text = "分类月度预算（必要支出优先保障）",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "分类月度预算（共 ${summary?.categoryStatuses?.size ?: 0} 项）",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
+                    FilledTonalButton(
+                        onClick = onOpenCategoryManager,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("open_category_manager_button")
+                    ) {
+                        Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("自定义分类", fontSize = 13.sp, maxLines = 1)
+                    }
+                }
             }
 
             items(summary?.categoryStatuses.orEmpty(), key = { it.categoryId }) { status ->

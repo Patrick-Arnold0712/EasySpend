@@ -26,6 +26,15 @@ interface CategoryDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(items: List<CategoryEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(category: CategoryEntity)
+
+    @Query("SELECT * FROM categories WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): CategoryEntity?
+
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun deleteById(id: String)
 }
 
 @Dao
@@ -50,6 +59,9 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET categoryId = :categoryId, classificationSource = :source WHERE id = :txId")
     suspend fun updateCategory(txId: Long, categoryId: String, source: ClassificationSource)
+
+    @Query("UPDATE transactions SET categoryId = :fallbackId WHERE categoryId = :oldId")
+    suspend fun reassignCategory(oldId: String, fallbackId: String)
 
     @Query("DELETE FROM transactions WHERE id = :txId")
     suspend fun deleteById(txId: Long)
@@ -95,6 +107,9 @@ interface ImportDao {
         source: ClassificationSource,
         note: String
     )
+
+    @Query("UPDATE import_candidates SET suggestedCategoryId = :fallbackId WHERE suggestedCategoryId = :oldId")
+    suspend fun reassignCategory(oldId: String, fallbackId: String)
 }
 
 @Dao
@@ -110,6 +125,9 @@ interface BudgetDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(budget: BudgetEntity)
+
+    @Query("DELETE FROM budgets WHERE categoryId = :categoryId")
+    suspend fun deleteByCategory(categoryId: String)
 }
 
 @Dao
@@ -137,6 +155,9 @@ interface MerchantPrefDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(pref: MerchantPreferenceEntity)
+
+    @Query("DELETE FROM merchant_preferences WHERE categoryId = :categoryId")
+    suspend fun deleteByCategory(categoryId: String)
 }
 
 @Dao

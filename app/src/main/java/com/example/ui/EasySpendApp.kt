@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Dashboard
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,6 +53,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -65,9 +69,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
 import com.example.data.local.ThemeMode
+import com.example.ui.screens.AccountManagementDialog
 import com.example.ui.screens.AgentScreen
 import com.example.ui.screens.ApiConfigDialog
+import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.BudgetAndInsightsScreen
+import com.example.ui.screens.CategoryManagementDialog
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.SettingsAndAuditDialog
 import com.example.ui.screens.TransactionsAndImportScreen
@@ -124,6 +131,28 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
     }
 
     EasySpendTheme(darkTheme = darkTheme) {
+        if (!state.accountState.isLoaded) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+            return@EasySpendTheme
+        }
+
+        val currentAccount = state.accountState.currentAccount
+        if (currentAccount == null) {
+            AuthScreen(
+                existingAccounts = state.accountState.accounts,
+                authErrorMessage = state.authErrorMessage,
+                onClearError = { viewModel.clearAuthError() },
+                onLogin = { user, pwd -> viewModel.loginAccount(user, pwd) },
+                onRegister = { user, pwd, nick -> viewModel.registerAccount(user, pwd, nick) }
+            )
+            return@EasySpendTheme
+        }
+
         val navController = rememberNavController()
         val backStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = backStackEntry?.destination?.route ?: ROUTE_DASHBOARD
@@ -131,6 +160,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
         val snackbarHostState = remember { SnackbarHostState() }
         var showSettings by remember { mutableStateOf(false) }
         var showApiConfigDialog by remember { mutableStateOf(false) }
+        var showCategoryManager by remember { mutableStateOf(false) }
+        var showAccountManager by remember { mutableStateOf(false) }
         var ledgerInitialTab by remember { mutableIntStateOf(0) }
         var agentPrefillPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -161,12 +192,22 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                         ROUTE_LEDGER -> "记账与核对"
                                         ROUTE_BUDGET -> "预算与分析"
                                         ROUTE_AGENT -> "财务助手"
-                                        else -> "易支道"
+                                        else -> "易支道 · ${currentAccount.displayLabel}"
                                     },
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    maxLines = 1
                                 )
                             },
                             actions = {
+                                IconButton(
+                                    onClick = { showAccountManager = true },
+                                    modifier = Modifier.testTag("account_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.AccountCircle,
+                                        contentDescription = stringResource(R.string.cd_account)
+                                    )
+                                }
                                 IconButton(
                                     onClick = { viewModel.toggleDarkMode(darkTheme) },
                                     modifier = Modifier.testTag("theme_toggle_button")
@@ -321,7 +362,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                     viewModel.addManualTransaction(amt, dir, ch, fs, cat, m, note)
                                 },
                                 onUpdateTxCategory = { id, cat, rem -> viewModel.updateTransactionCategory(id, cat, rem) },
-                                onDeleteTx = { id -> viewModel.deleteTransaction(id) }
+                                onDeleteTx = { id -> viewModel.deleteTransaction(id) },
+                                onOpenCategoryManager = { showCategoryManager = true }
                             )
                         }
                         composable(ROUTE_BUDGET) {
@@ -331,7 +373,8 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                                 onApplyProposal = { catId, fen -> viewModel.applyDeterministicProposal(catId, fen) },
                                 onUpdateSavingsGoal = { t, a, p -> viewModel.updateSavingsGoal(t, a, p) },
                                 onGenerateAiInsights = { viewModel.generateAiInsights() },
-                                onOpenApiSettings = { showApiConfigDialog = true }
+                                onOpenApiSettings = { showApiConfigDialog = true },
+                                onOpenCategoryManager = { showCategoryManager = true }
                             )
                         }
                         composable(ROUTE_AGENT) {
@@ -359,6 +402,14 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     onTestApiConnection = { p, url, key, model -> viewModel.testApiConnection(p, url, key, model) },
                     onClearApiTestFeedback = { viewModel.clearApiTestFeedback() },
                     onToggleBeginnerGuide = { show -> viewModel.setHideBeginnerGuide(!show) },
+                    onOpenCategoryManager = {
+                        showSettings = false
+                        showCategoryManager = true
+                    },
+                    onOpenAccountManager = {
+                        showSettings = false
+                        showAccountManager = true
+                    },
                     onDismiss = { showSettings = false }
                 )
             }
@@ -370,6 +421,33 @@ fun EasySpendApp(viewModel: EasySpendViewModel = viewModel()) {
                     onTestApiConnection = { p, url, key, model -> viewModel.testApiConnection(p, url, key, model) },
                     onClearFeedback = { viewModel.clearApiTestFeedback() },
                     onDismiss = { showApiConfigDialog = false }
+                )
+            }
+
+            if (showCategoryManager) {
+                CategoryManagementDialog(
+                    categories = state.categories,
+                    onCreateCategory = { name, group, keywords, budgetStr ->
+                        viewModel.createCustomCategory(name, group, keywords, budgetStr)
+                    },
+                    onUpdateCategory = { id, name, group, keywords ->
+                        viewModel.updateCustomCategory(id, name, group, keywords)
+                    },
+                    onDeleteCategory = { id ->
+                        viewModel.deleteCustomCategory(id)
+                    },
+                    onDismiss = { showCategoryManager = false }
+                )
+            }
+
+            if (showAccountManager) {
+                AccountManagementDialog(
+                    currentAccount = currentAccount,
+                    allAccountsCount = state.accountState.accounts.size,
+                    onUpdateNickname = { viewModel.updateAccountNickname(it) },
+                    onChangePassword = { oldPwd, newPwd -> viewModel.changeAccountPassword(oldPwd, newPwd) },
+                    onLogout = { viewModel.logoutAccount() },
+                    onDismiss = { showAccountManager = false }
                 )
             }
         }

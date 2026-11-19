@@ -63,8 +63,16 @@ object BudgetAndForecastEngine {
         "study" to 25000L,
         "transit" to 12000L,
         "daily" to 18000L,
+        "housing" to 15000L,
+        "medical" to 10000L,
+        "telecom" to 8000L,
+        "beverage" to 12000L,
         "entertainment" to 20000L,
         "shopping" to 20000L,
+        "beauty" to 15000L,
+        "social" to 15000L,
+        "sports" to 10000L,
+        "travel" to 20000L,
         "other_expense" to 10000L
     )
 

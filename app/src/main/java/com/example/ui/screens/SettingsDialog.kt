@@ -149,6 +149,8 @@ fun SettingsAndAuditDialog(
     onTestApiConnection: (ApiProviderType, String, String, String) -> Unit,
     onClearApiTestFeedback: () -> Unit,
     onToggleBeginnerGuide: (Boolean) -> Unit = {},
+    onOpenCategoryManager: () -> Unit = {},
+    onOpenAccountManager: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val semantic = MaterialTheme.semanticColors
@@ -173,6 +175,41 @@ fun SettingsAndAuditDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // 0. Quick Entries: Local Account & Custom Categories
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenAccountManager,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("settings_open_account_button")
+                    ) {
+                        Text(
+                            text = "账号：${state.accountState.currentAccount?.displayLabel ?: "管理"}",
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onOpenCategoryManager,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("settings_open_categories_button")
+                    ) {
+                        Text(
+                            text = "分类管理 (${state.categories.size})",
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+
                 // 1. User API Configuration
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("大模型 API 配置（直连调用）", style = MaterialTheme.typography.titleSmall)

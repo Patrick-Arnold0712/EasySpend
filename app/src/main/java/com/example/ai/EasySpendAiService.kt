@@ -470,7 +470,9 @@ class EasySpendAiService(
             请为以下待确认交易提供消费预分类建议，严格返回 JSON 对象（不要输出额外说明）：
             格式：{"items":[{"candidateId":1,"suggestedCategoryId":"food","confidence":0.92,"reason":"简短依据"}]}
             可选分类ID: $catListDesc
-            如果是美团/淘宝/便利店等多用途商户且商品描述不明确，请将 confidence 设为 <= 0.72 并在 reason 提示需用户确认。
+            分类要求：
+            1. 必须结合「金额 + 商户 + 商品描述」综合判断同一平台下的不同消费类型。例如：美团/哈啰等平台 5 元以下小额通常为共享单车(transit)，12~120 元通常为外卖餐饮(food)，250 元以上可能是酒店出游(travel)。
+            2. 若商户为全家/淘宝/京东等多用途商户且描述不明确，请结合金额猜测并将 confidence 设为 <= 0.72 提示用户确认。
             待分类记录：
             $itemsText
         """.trimIndent()

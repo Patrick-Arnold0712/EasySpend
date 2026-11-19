@@ -124,7 +124,7 @@ class AgentFinancialAdviceTest {
 
         // 4. calculate_budget
         val budgetRes = tools.executeTool("test-s1", "calculate_budget", mapOf("monthKey" to monthKey), monthKey)
-        assertEquals(7, budgetRes.resultJson.getJSONArray("categories").length())
+        assertEquals(15, budgetRes.resultJson.getJSONArray("categories").length())
 
         // 5. forecast_cashflow
         val forecastRes = tools.executeTool("test-s1", "forecast_cashflow", mapOf("monthKey" to monthKey), monthKey)

@@ -418,7 +418,12 @@ fun DashboardScreen(
                             }
                         }
 
-                        val statuses = summary?.categoryStatuses.orEmpty().take(5)
+                        val statuses = remember(summary?.categoryStatuses) {
+                            summary?.categoryStatuses
+                                .orEmpty()
+                                .sortedWith(compareByDescending<com.example.domain.finance.CategoryBudgetStatus> { it.spentFen > 0L }.thenByDescending { it.spentFen })
+                                .take(6)
+                        }
                         statuses.forEach { st ->
                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Row(

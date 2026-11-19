@@ -8,7 +8,9 @@ data class CategoryEntity(
     @PrimaryKey val id: String,
     val name: String,
     val group: CategoryGroup,
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    val isCustom: Boolean = false,
+    val keywords: String = ""
 )
 
 @Entity(tableName = "transactions")

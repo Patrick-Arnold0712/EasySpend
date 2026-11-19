@@ -63,6 +63,11 @@ private val lightChartPalette = listOf(
     Color(0xFF5D737E),
     Color(0xFFC94A4A),
     Color(0xFF7C6B9E),
+    Color(0xFF2B8A9C),
+    Color(0xFFB85D7A),
+    Color(0xFF6B8E23),
+    Color(0xFF8C6239),
+    Color(0xFF4B6CB7),
     Color(0xFF4F9D88)
 )
 
@@ -73,6 +78,11 @@ private val darkChartPalette = listOf(
     Color(0xFF8FA7B5),
     Color(0xFFFF7A7A),
     Color(0xFFA794CE),
+    Color(0xFF5AC8D8),
+    Color(0xFFE88AA8),
+    Color(0xFF9CCB5C),
+    Color(0xFFD4A373),
+    Color(0xFF7C9CE6),
     Color(0xFF6CD6BA)
 )
 

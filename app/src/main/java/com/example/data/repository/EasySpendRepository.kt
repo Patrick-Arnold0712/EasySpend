@@ -5,6 +5,7 @@ import com.example.data.model.AgentToolLogEntity
 import com.example.data.model.BudgetEntity
 import com.example.data.model.CandidateResolution
 import com.example.data.model.CategoryEntity
+import com.example.data.model.CategoryGroup
 import com.example.data.model.ClassificationSource
 import com.example.data.model.DiscrepancyType
 import com.example.data.model.FundingSource
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.UUID
 
 class EasySpendRepository(private val db: EasySpendDatabase) {
 
@@ -109,8 +111,16 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 PaymentChannel.WECHAT_PAY
             )
             val prefs = merchantPrefDao.getAll()
+            val allCategories = categoryDao.getAll()
             val committed = wxRecords.map { rec ->
-                val cls = ClassificationEngine.classify(rec.merchant, rec.rawDescription, rec.direction, prefs)
+                val cls = ClassificationEngine.classify(
+                    merchant = rec.merchant,
+                    description = rec.rawDescription,
+                    direction = rec.direction,
+                    preferences = prefs,
+                    amountFen = rec.amountFen,
+                    customCategories = allCategories
+                )
                 TransactionEntity(
                     externalRefId = rec.externalRefId,
                     occurredAtMillis = rec.occurredAtMillis,
@@ -173,6 +183,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         val existingTxs = txDao.getAll()
         val existingPending = importDao.getPendingCandidates()
         val prefs = merchantPrefDao.getAll()
+        val allCategories = categoryDao.getAll()
 
         val initialBatchId = importDao.insertBatch(
             ImportBatchEntity(
@@ -188,7 +199,8 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
             records = records,
             existingTransactions = existingTxs,
             preferences = prefs,
-            existingPendingCandidates = existingPending
+            existingPendingCandidates = existingPending,
+            customCategories = allCategories
         )
         val cleanCount = candidates.count { it.discrepancyType == DiscrepancyType.NONE }
         val discrepancyCount = candidates.size - cleanCount
@@ -222,7 +234,8 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
             records = listOf(rec),
             existingTransactions = txDao.getAll(),
             preferences = merchantPrefDao.getAll(),
-            existingPendingCandidates = importDao.getPendingCandidates()
+            existingPendingCandidates = importDao.getPendingCandidates(),
+            customCategories = categoryDao.getAll()
         )
         val stagedCandidate = candidates.first()
         val isClean = stagedCandidate.discrepancyType == DiscrepancyType.NONE
@@ -374,6 +387,85 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 monthlyLimitFen = newLimitFen.coerceAtLeast(0L)
             )
         )
+    }
+
+    suspend fun createCustomCategory(
+        name: String,
+        group: CategoryGroup,
+        keywords: String,
+        monthlyLimitFen: Long?,
+        monthKey: String
+    ): Result<CategoryEntity> {
+        val cleanName = name.trim()
+        if (cleanName.isBlank() || cleanName.length > 16) {
+            return Result.failure(IllegalArgumentException("分类名称长度需为 1~16 个字符"))
+        }
+        ensureInitialized(monthKey)
+        val existing = categoryDao.getAll()
+        if (existing.any { it.name.equals(cleanName, ignoreCase = true) }) {
+            return Result.failure(IllegalArgumentException("已存在同名分类「$cleanName」"))
+        }
+        val nextSortOrder = (existing.maxOfOrNull { it.sortOrder } ?: 21) + 1
+        val newCategory = CategoryEntity(
+            id = "custom_${UUID.randomUUID().toString().replace("-", "").take(8)}",
+            name = cleanName,
+            group = group,
+            sortOrder = nextSortOrder,
+            isCustom = true,
+            keywords = keywords.trim()
+        )
+        categoryDao.upsert(newCategory)
+        if (group == CategoryGroup.ESSENTIAL_EXPENSE || group == CategoryGroup.FLEXIBLE_EXPENSE) {
+            val limit = (monthlyLimitFen ?: 15000L).coerceAtLeast(0L)
+            budgetDao.upsert(BudgetEntity(monthKey = monthKey, categoryId = newCategory.id, monthlyLimitFen = limit))
+        }
+        return Result.success(newCategory)
+    }
+
+    suspend fun updateCustomCategory(
+        categoryId: String,
+        name: String,
+        group: CategoryGroup,
+        keywords: String
+    ): Result<CategoryEntity> {
+        val cleanName = name.trim()
+        if (cleanName.isBlank() || cleanName.length > 16) {
+            return Result.failure(IllegalArgumentException("分类名称长度需为 1~16 个字符"))
+        }
+        val existing = categoryDao.getById(categoryId)
+            ?: return Result.failure(IllegalArgumentException("未找到该分类"))
+        val duplicate = categoryDao.getAll().firstOrNull {
+            it.id != categoryId && it.name.equals(cleanName, ignoreCase = true)
+        }
+        if (duplicate != null) {
+            return Result.failure(IllegalArgumentException("已存在同名分类「$cleanName」"))
+        }
+        val updated = existing.copy(
+            name = cleanName,
+            group = if (existing.isCustom) group else existing.group,
+            keywords = keywords.trim()
+        )
+        categoryDao.upsert(updated)
+        return Result.success(updated)
+    }
+
+    suspend fun deleteCustomCategory(categoryId: String): Result<Unit> {
+        val existing = categoryDao.getById(categoryId)
+            ?: return Result.failure(IllegalArgumentException("未找到该分类"))
+        if (!existing.isCustom) {
+            return Result.failure(IllegalArgumentException("系统内置分类不可删除"))
+        }
+        val fallbackId = when (existing.group) {
+            CategoryGroup.INCOME -> "other_income"
+            CategoryGroup.NEUTRAL -> "transfer"
+            else -> "other_expense"
+        }
+        txDao.reassignCategory(categoryId, fallbackId)
+        importDao.reassignCategory(categoryId, fallbackId)
+        budgetDao.deleteByCategory(categoryId)
+        merchantPrefDao.deleteByCategory(categoryId)
+        categoryDao.deleteById(categoryId)
+        return Result.success(Unit)
     }
 
     suspend fun updateSavingsGoal(

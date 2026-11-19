@@ -49,6 +49,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.model.CandidateResolution
 import com.example.data.model.CategoryEntity
@@ -112,6 +114,7 @@ fun TransactionsAndImportScreen(
     onAddManualTransaction: (String, TransactionDirection, PaymentChannel, FundingSource, String, String, String) -> Unit,
     onUpdateTxCategory: (Long, String, Boolean) -> Unit,
     onDeleteTx: (Long) -> Unit,
+    onOpenCategoryManager: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -136,6 +139,10 @@ fun TransactionsAndImportScreen(
     var listenerEnabled by remember {
         mutableStateOf(PaymentNotificationListenerService.isNotificationAccessEnabled(context))
     }
+    var showCaptureDiagnostics by remember { mutableStateOf(false) }
+    var rebindFeedback by remember { mutableStateOf<String?>(null) }
+    val listenerBound by PaymentNotificationListenerService.isListenerBoundFlow.collectAsStateWithLifecycle()
+    val recentDiagnostics by PaymentNotificationListenerService.recentDiagnosticsFlow.collectAsStateWithLifecycle()
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -194,10 +201,23 @@ fun TransactionsAndImportScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(
-                                    text = "导入微信 / 支付宝账单",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "导入微信 / 支付宝账单",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(
+                                        onClick = onOpenCategoryManager,
+                                        modifier = Modifier.testTag("ledger_manage_categories_button")
+                                    ) {
+                                        Text("自定义分类", fontSize = 13.sp)
+                                    }
+                                }
                                 Text(
                                     text = "选择微信 (.xlsx / .csv) 或支付宝 (.csv) 账单文件，或开启支付通知自动抓账。所有新记录都会先帮你查重和预分类，核对无误再写入账本。",
                                     style = MaterialTheme.typography.bodySmall,
@@ -269,31 +289,98 @@ fun TransactionsAndImportScreen(
                                         .fillMaxWidth()
                                         .testTag("notification_listener_status_card")
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(
-                                            text = if (listenerEnabled) "通知自动抓账：已开启" else "通知自动抓账：未授权（可先点上方模拟体验）",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                runCatching {
-                                                    context.startActivity(
-                                                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    )
-                                                }
-                                            },
-                                            modifier = Modifier.testTag("open_notification_settings_button")
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
-                                            Text(if (listenerEnabled) "去管理" else "去开启")
+                                            val statusText = when {
+                                                !listenerEnabled -> "通知自动抓账：未授权（可先点上方模拟体验）"
+                                                listenerBound -> "通知自动抓账：已开启（实时在线 · 支持连刷多条）"
+                                                else -> "通知自动抓账：已授权（若偶发漏抓可点下方重连）"
+                                            }
+                                            Text(
+                                                text = statusText,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(
+                                                onClick = { showCaptureDiagnostics = !showCaptureDiagnostics },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                                                modifier = Modifier.testTag("toggle_notification_diagnostics_button")
+                                            ) {
+                                                Text(if (showCaptureDiagnostics) "收起" else "防漏抓", fontSize = 12.sp)
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    runCatching {
+                                                        context.startActivity(
+                                                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        )
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                                                modifier = Modifier.testTag("open_notification_settings_button")
+                                            ) {
+                                                Text(if (listenerEnabled) "去管理" else "去开启", fontSize = 12.sp)
+                                            }
+                                        }
+
+                                        if (showCaptureDiagnostics) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                            Text(
+                                                text = "微信自动扣款 / 饭堂多窗口连刷防漏抓建议：\n" +
+                                                    "1. 微信 → 设置 → 新消息通知 → 开启「通知显示消息详情」（否则只推“微信支付凭证”不含金额）\n" +
+                                                    "2. 微信 → 微信支付公众号 → 右上角设置 → 关闭「消息免打扰」\n" +
+                                                    "3. 手机电池管理将易支道设为「无限制/允许后台运行」，防止连刷时被系统省电挂起",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = rebindFeedback ?: "最近通知诊断 (${recentDiagnostics.size} 条)",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                TextButton(
+                                                    onClick = {
+                                                        val ok = PaymentNotificationListenerService.requestRebindIfPossible(context)
+                                                        rebindFeedback = if (ok) "已请求系统重新连接通知监听服务" else "请先在系统设置中开启通知读取权限"
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                    modifier = Modifier.testTag("rebind_notification_listener_button")
+                                                ) {
+                                                    Text("重连监听", fontSize = 12.sp)
+                                                }
+                                            }
+                                            if (recentDiagnostics.isNotEmpty()) {
+                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    recentDiagnostics.take(5).forEach { entry ->
+                                                        Text(
+                                                            text = "${if (entry.captured) "✓" else "!"} [${entry.channelLabel}] ${entry.preview} · ${entry.reason}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = if (entry.captured) {
+                                                                MaterialTheme.colorScheme.onSurface
+                                                            } else {
+                                                                MaterialTheme.colorScheme.error
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -454,6 +541,10 @@ fun TransactionsAndImportScreen(
         ManualTransactionDialog(
             categories = state.categories,
             onDismiss = { showManualDialog = false },
+            onOpenCategoryManager = {
+                showManualDialog = false
+                onOpenCategoryManager()
+            },
             onSave = { amt, dir, ch, fs, catId, merchant, note ->
                 onAddManualTransaction(amt, dir, ch, fs, catId, merchant, note)
                 showManualDialog = false
@@ -770,6 +861,7 @@ private fun TransactionLedgerCard(
 private fun ManualTransactionDialog(
     categories: List<CategoryEntity>,
     onDismiss: () -> Unit,
+    onOpenCategoryManager: () -> Unit = {},
     onSave: (String, TransactionDirection, PaymentChannel, FundingSource, String, String, String) -> Unit
 ) {
     var amountStr by remember { mutableStateOf("") }
@@ -864,13 +956,26 @@ private fun ManualTransactionDialog(
                     ExposedDropdownMenu(expanded = catExpanded, onDismissRequest = { catExpanded = false }) {
                         categories.forEach { c ->
                             DropdownMenuItem(
-                                text = { Text(c.name) },
+                                text = { Text(if (c.isCustom) "${c.name}（自定义）" else c.name) },
                                 onClick = {
                                     categoryId = c.id
                                     catExpanded = false
                                 }
                             )
                         }
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "+ 新建自定义分类...",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            onClick = {
+                                catExpanded = false
+                                onOpenCategoryManager()
+                            }
+                        )
                     }
                 }
                 OutlinedTextField(

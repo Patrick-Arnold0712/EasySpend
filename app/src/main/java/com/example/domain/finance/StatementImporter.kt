@@ -1,6 +1,7 @@
 package com.example.domain.finance
 
 import com.example.data.model.CandidateResolution
+import com.example.data.model.CategoryEntity
 import com.example.data.model.DiscrepancyType
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportCandidateEntity
@@ -161,13 +162,17 @@ object StatementImporter {
         return records
     }
 
-    private val nonPaymentNoiseKeywords = listOf(
-        "条新消息", "语音通话", "视频通话", "撤回了一条消息", "正在登录", "邀请你加入", "请求添加你为朋友"
+    private val strictNonPaymentNoiseKeywords = listOf(
+        "语音通话", "视频通话", "撤回了一条消息", "正在登录", "邀请你加入", "请求添加你为朋友"
     )
+
+    private val leadingBundlePrefixRegex = Regex("""^\s*(?:\[\d+条\]|\d+条新消息[：:\s]*)+\s*""")
 
     private val paymentContextKeywords = listOf(
         "微信支付", "微信收款", "支付宝", "支付成功", "付款", "收款", "到账", "退款",
-        "转入", "转出", "扣款", "消费", "支出", "零钱入账", "花呗", "余额宝", "账单", "收钱码",
+        "转入", "转出", "扣款", "扣费", "代扣", "自动扣", "免密", "轻松付", "先享后付", "先乘后付",
+        "消费", "支出", "零钱入账", "通过零钱", "零钱扣", "零钱支付", "零钱通", "亲属卡", "刷脸支付",
+        "花呗", "余额宝", "账单", "收钱码", "支付凭证", "扣费凭证", "扣款凭证", "交易提醒",
         "支付人民币", "支付￥", "支付¥"
     )
 
@@ -176,11 +181,24 @@ object StatementImporter {
     )
 
     private val verbDecimalAmountRegex = Regex(
-        """(?:支付|付款|收款|到账|消费|扣款|退款|转入|转出|金额)[:：\s]*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"""
+        """(?:(?<!微信)支付|付款|收款|到账|消费|扣款|扣费|代扣|自动扣款|免密支付|支出|退款|转入|转出|金额)[:：\s]*(?:人民币|￥|¥)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)(?![\d条个笔次件张分秒时点号月日年楼层窗口%:：-])"""
+    )
+
+    private val detailFieldMerchantRegex = Regex(
+        """(?:扣费内容|消费商户|扣款商户|商户名称|收款商户|交易对方|收款方|商户)[：:\s]+([^\n，,。；;¥￥]{2,28})"""
     )
 
     private val merchantRegex = Regex(
-        """(?:向|在|来自|商户[：:]?|收款方[：:]?|付款给|收到)\s*([^\s，,。：:()（）¥￥\d]{2,20}?)(?=\s*(?:支付|付款|消费|转账|退款|收款|的|人民币|￥|¥|\d|$))"""
+        """(?:向|在|来自|付款给|收到)\s*([^\s，,。：:()（）¥￥]{2,24}?)(?=\s*(?:支付|付款|消费|转账|退款|收款|扣款|扣费|代扣|自动扣|的|人民币|￥|¥|\d+(?:\.\d{1,2})?\s*元|$))"""
+    )
+
+    private val preDebitMerchantRegex = Regex(
+        """^([^\s，,。：:()（）¥￥]{2,20})\s+(?:通过零钱|通过银行卡|自动扣|免密|扣款|扣费|代扣)"""
+    )
+
+    private val genericNotificationTitles = setOf(
+        "微信", "微信支付", "微信收款助手", "微信支付凭证", "服务通知",
+        "支付宝", "支付宝通知", "支付宝账单", "收钱码"
     )
 
     fun parsePaymentNotification(
@@ -189,12 +207,12 @@ object StatementImporter {
         text: String,
         nowMillis: Long = System.currentTimeMillis()
     ): ParsedRawRecord? {
-        val cleanTitle = title.trim()
-        val cleanText = text.trim()
+        val cleanTitle = leadingBundlePrefixRegex.replace(title.trim(), "").trim()
+        val cleanText = leadingBundlePrefixRegex.replace(text.trim(), "").trim()
         if (cleanText.isBlank()) return null
 
         val combined = "$cleanTitle $cleanText".trim()
-        if (nonPaymentNoiseKeywords.any { combined.contains(it) }) return null
+        if (strictNonPaymentNoiseKeywords.any { combined.contains(it) }) return null
 
         val channel = when {
             packageName.contains("tencent.mm", ignoreCase = true) || combined.contains("微信") -> PaymentChannel.WECHAT_PAY
@@ -220,13 +238,12 @@ object StatementImporter {
             else -> TransactionDirection.EXPENSE
         }
 
-        val extractedMerchant = merchantRegex.find(combined)?.groupValues?.getOrNull(1)?.trim()
-            ?.takeIf { it.isNotBlank() && it !in listOf("微信", "支付宝", "微信支付") }
-        val merchant = extractedMerchant
-            ?: cleanTitle.take(18).ifBlank { "${channel.displayName}通知商户" }
+        val merchant = extractNotificationMerchant(cleanTitle, cleanText, combined, channel)
+        val normalizedBody = combined.replace(Regex("""\s+"""), " ").trim()
+        val fingerprint = (merchant.lowercase() + "|" + normalizedBody.lowercase()).hashCode().toUInt().toString(16)
 
         return ParsedRawRecord(
-            externalRefId = "NOTIF_${channel.name}_${nowMillis / 1000}_${amountFen}",
+            externalRefId = "NOTIF_${channel.name}_${nowMillis / 1000}_${amountFen}_$fingerprint",
             occurredAtMillis = nowMillis,
             amountFen = amountFen,
             direction = direction,
@@ -234,8 +251,85 @@ object StatementImporter {
             fundingSource = if (direction == TransactionDirection.INCOME) FundingSource.PART_TIME_INCOME else FundingSource.LIVING_ALLOWANCE,
             sourceType = TransactionSourceType.NOTIFICATION_CAPTURE,
             merchant = merchant,
-            rawDescription = combined.take(120)
+            rawDescription = normalizedBody.take(160)
         )
+    }
+
+    private fun extractNotificationMerchant(
+        cleanTitle: String,
+        cleanText: String,
+        combined: String,
+        channel: PaymentChannel
+    ): String {
+        val detailField = detailFieldMerchantRegex.find(combined)?.groupValues?.getOrNull(1)
+            ?.trim()
+            ?.replace(Regex("""\s+(?:管理|对订单|账单详情|扣费服务).*$"""), "")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && it !in genericNotificationTitles }
+        if (detailField != null) return detailField.take(24)
+
+        val verbExtracted = merchantRegex.find(combined)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotBlank() && it !in genericNotificationTitles }
+        if (verbExtracted != null) return verbExtracted.take(24)
+
+        val preDebit = preDebitMerchantRegex.find(cleanText)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotBlank() && it !in genericNotificationTitles }
+        if (preDebit != null) return preDebit.take(24)
+
+        val nonGenericTitle = cleanTitle.take(24)
+            .takeIf { it.isNotBlank() && it !in genericNotificationTitles }
+        if (nonGenericTitle != null) return nonGenericTitle
+
+        if (combined.contains("校园轻松付")) return "校园轻松付"
+        return cleanTitle.take(18).ifBlank { "${channel.displayName}通知商户" }
+    }
+
+    private fun isGenericMerchantName(name: String): Boolean {
+        val trimmed = name.trim()
+        return trimmed.isBlank() ||
+            trimmed in genericNotificationTitles ||
+            trimmed.endsWith("通知商户") ||
+            trimmed == "校园轻松付"
+    }
+
+    private fun isLikelyFuzzyDuplicate(
+        existingSource: TransactionSourceType,
+        existingOccurredAt: Long,
+        existingMerchant: String,
+        existingDescription: String,
+        existingAmountFen: Long,
+        existingDirection: TransactionDirection,
+        rec: ParsedRawRecord
+    ): Boolean {
+        if (existingDirection != rec.direction || existingAmountFen != rec.amountFen) return false
+
+        val timeDelta = abs(existingOccurredAt - rec.occurredAtMillis)
+        val bothNotifications =
+            existingSource == TransactionSourceType.NOTIFICATION_CAPTURE &&
+                rec.sourceType == TransactionSourceType.NOTIFICATION_CAPTURE
+
+        if (bothNotifications) {
+            val bothSpecificMerchants = !isGenericMerchantName(existingMerchant) && !isGenericMerchantName(rec.merchant)
+            if (bothSpecificMerchants && !existingMerchant.equals(rec.merchant, ignoreCase = true)) {
+                // Distinct cafeteria windows / merchants (e.g. 松涛园1楼大众窗口19 vs 窗口15)
+                return false
+            }
+            // If descriptions explicitly differ (e.g. different window/order detail), treat as separate consecutive payment
+            val normExistingDesc = existingDescription.replace(Regex("""\s+"""), " ").trim()
+            val normRecDesc = rec.rawDescription.replace(Regex("""\s+"""), " ").trim()
+            if (normExistingDesc.isNotBlank() && normRecDesc.isNotBlank() &&
+                !normExistingDesc.equals(normRecDesc, ignoreCase = true) &&
+                timeDelta > 5_000L
+            ) {
+                return false
+            }
+            // Genuine Android system duplicate re-notification arrives within ~20 seconds
+            return timeDelta <= 20_000L
+        }
+
+        // Cross-source reconciliation (e.g. notification vs official WeChat/Alipay statement)
+        return timeDelta <= 30 * 60 * 1000L ||
+            (existingMerchant.equals(rec.merchant, ignoreCase = true) && timeDelta <= 24 * 3600 * 1000L)
     }
 
     fun buildStagingCandidates(
@@ -243,7 +337,8 @@ object StatementImporter {
         records: List<ParsedRawRecord>,
         existingTransactions: List<TransactionEntity>,
         preferences: List<MerchantPreferenceEntity>,
-        existingPendingCandidates: List<ImportCandidateEntity> = emptyList()
+        existingPendingCandidates: List<ImportCandidateEntity> = emptyList(),
+        customCategories: List<CategoryEntity> = emptyList()
     ): List<ImportCandidateEntity> {
         val seenInBatch = mutableListOf<ParsedRawRecord>()
         return records.map { rec ->
@@ -251,7 +346,9 @@ object StatementImporter {
                 merchant = rec.merchant,
                 description = rec.rawDescription,
                 direction = rec.direction,
-                preferences = preferences
+                preferences = preferences,
+                amountFen = rec.amountFen,
+                customCategories = customCategories
             )
 
             // 1. Exact externalRefId duplicate check (ledger + pending queue + earlier in same batch)
@@ -267,30 +364,40 @@ object StatementImporter {
                 seenInBatch.firstOrNull { it.externalRefId == rec.externalRefId }
             } else null
 
-            // 2. Fuzzy duplicate check (same amount & direction within 30 mins, or same merchant + amount same day)
+            // 2. Fuzzy duplicate check (smart handling for consecutive notifications vs cross-source statements)
             val fuzzyDup = if (exactDup == null && pendingExactDup == null && batchExactDup == null) {
                 existingTransactions.firstOrNull { tx ->
-                    tx.direction == rec.direction &&
-                        tx.amountFen == rec.amountFen &&
-                        (abs(tx.occurredAtMillis - rec.occurredAtMillis) <= 30 * 60 * 1000L ||
-                            (tx.merchant.equals(rec.merchant, ignoreCase = true) &&
-                                abs(tx.occurredAtMillis - rec.occurredAtMillis) <= 24 * 3600 * 1000L))
+                    isLikelyFuzzyDuplicate(
+                        existingSource = tx.sourceType,
+                        existingOccurredAt = tx.occurredAtMillis,
+                        existingMerchant = tx.merchant,
+                        existingDescription = tx.rawDescription,
+                        existingAmountFen = tx.amountFen,
+                        existingDirection = tx.direction,
+                        rec = rec
+                    )
                 }
             } else null
             val pendingFuzzyDup = if (exactDup == null && pendingExactDup == null && batchExactDup == null && fuzzyDup == null) {
                 existingPendingCandidates.firstOrNull { c ->
-                    c.direction == rec.direction &&
-                        c.amountFen == rec.amountFen &&
-                        (abs(c.occurredAtMillis - rec.occurredAtMillis) <= 30 * 60 * 1000L ||
-                            (c.merchant.equals(rec.merchant, ignoreCase = true) &&
-                                abs(c.occurredAtMillis - rec.occurredAtMillis) <= 24 * 3600 * 1000L))
+                    isLikelyFuzzyDuplicate(
+                        existingSource = c.sourceType,
+                        existingOccurredAt = c.occurredAtMillis,
+                        existingMerchant = c.merchant,
+                        existingDescription = c.rawDescription,
+                        existingAmountFen = c.amountFen,
+                        existingDirection = c.direction,
+                        rec = rec
+                    )
                 }
             } else null
 
-            // 3. Same-time/merchant amount discrepancy check (e.g. partial capture vs official bill)
+            // 3. Same-time/merchant amount discrepancy check (cross-source only so consecutive cafeteria windows never false-alarm)
             val amountMismatch = if (exactDup == null && pendingExactDup == null && batchExactDup == null && fuzzyDup == null && pendingFuzzyDup == null) {
                 existingTransactions.firstOrNull { tx ->
-                    tx.direction == rec.direction &&
+                    tx.sourceType != rec.sourceType &&
+                        tx.direction == rec.direction &&
+                        !isGenericMerchantName(tx.merchant) &&
                         tx.merchant.equals(rec.merchant, ignoreCase = true) &&
                         abs(tx.occurredAtMillis - rec.occurredAtMillis) <= 15 * 60 * 1000L &&
                         tx.amountFen != rec.amountFen

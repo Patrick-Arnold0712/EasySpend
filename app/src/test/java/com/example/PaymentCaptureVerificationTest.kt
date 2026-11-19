@@ -303,7 +303,7 @@ class PaymentCaptureVerificationTest {
         assertEquals(DiscrepancyType.NONE, first.discrepancyType)
         assertEquals(TransactionSourceType.NOTIFICATION_CAPTURE, first.sourceType)
         assertEquals(1990L, first.amountFen)
-        assertEquals("food", first.suggestedCategoryId)
+        assertEquals("beverage", first.suggestedCategoryId)
         assertEquals(0, repository.getTransactionsSnapshot(monthKey).size)
 
         // 2. Duplicate re-notification 5 seconds later MUST be flagged as POTENTIAL_DUPLICATE against pending queue
@@ -321,7 +321,7 @@ class PaymentCaptureVerificationTest {
         repository.resolveCandidateAsSkipOrDismiss(duplicatePending.id, CandidateResolution.MERGED_SKIP)
         repository.confirmCandidateToLedger(
             candidateId = first.id,
-            selectedCategoryId = "food",
+            selectedCategoryId = "beverage",
             selectedFundingSource = FundingSource.LIVING_ALLOWANCE,
             rememberMerchantPreference = true,
             note = "早八提神咖啡"
@@ -406,5 +406,152 @@ class PaymentCaptureVerificationTest {
         composeRule.onNodeWithText("美团外卖")
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun `wechat campus auto-debit and stacked multi-window notifications are all extracted and parsed`() {
+        PaymentNotificationListenerService.clearDiagnosticsForTests()
+        val postTime = 1_794_988_900_000L
+
+        // 1. Exact screenshot wording: 中山大学 通过零钱扣款 ¥ 4.50 扣费服务 校园轻松付 扣费内容 松涛园1楼大众窗口15
+        val campusAutoDebit = StatementImporter.parsePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学\n通过零钱扣款\n¥ 4.50\n扣费服务 校园轻松付\n扣费内容 松涛园1楼大众窗口15",
+            nowMillis = postTime
+        )
+        assertNotNull(campusAutoDebit)
+        assertEquals(450L, campusAutoDebit?.amountFen)
+        assertEquals(TransactionDirection.EXPENSE, campusAutoDebit?.direction)
+        assertEquals("松涛园1楼大众窗口15", campusAutoDebit?.merchant)
+
+        // 2. [2条] stacked prefix + 扣费 without ¥/元 symbol
+        val bundledPrefix = StatementImporter.parsePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "[2条] 微信支付",
+            text = "2条新消息 校园轻松付扣费4.50 扣费内容：松涛园1楼大众窗口19",
+            nowMillis = postTime + 1_000L
+        )
+        assertNotNull(bundledPrefix)
+        assertEquals(450L, bundledPrefix?.amountFen)
+        assertEquals("松涛园1楼大众窗口19", bundledPrefix?.merchant)
+
+        // 3. InboxStyle (EXTRA_TEXT_LINES) with 3 consecutive cafeteria deductions in one notification
+        val inboxNotification = Notification.Builder(context, "pay")
+            .setContentTitle("微信支付")
+            .setContentText("3条新消息")
+            .setStyle(
+                Notification.InboxStyle()
+                    .addLine("微信支付: 通过零钱扣款¥6.00 扣费内容：松涛园1楼大众窗口19")
+                    .addLine("微信支付: 通过零钱扣款¥4.50 扣费内容：松涛园1楼大众窗口15")
+                    .addLine("微信支付: 通过零钱扣款¥2.50 扣费内容：松涛园1楼汤品窗口3")
+            )
+            .build()
+        @Suppress("DEPRECATION")
+        val inboxSbn = StatusBarNotification(
+            "com.tencent.mm",
+            "com.tencent.mm",
+            201,
+            null,
+            0,
+            0,
+            0,
+            inboxNotification,
+            Process.myUserHandle(),
+            postTime
+        )
+        val inboxPayloads = PaymentNotificationListenerService.extractPayloads(inboxSbn)
+        assertEquals(3, inboxPayloads.size)
+        assertTrue(inboxPayloads.all { it.isFromBundle })
+
+        // First delivery marks all 3 bundle lines; subsequent update adding a 4th line skips the first 3
+        inboxPayloads.forEach { p ->
+            assertFalse(PaymentNotificationListenerService.shouldSkipRecentlyProcessed(p))
+        }
+        inboxPayloads.forEach { p ->
+            assertTrue(PaymentNotificationListenerService.shouldSkipRecentlyProcessed(p))
+        }
+
+        // 4. MessagingStyle (EXTRA_MESSAGES) with 2 consecutive cafeteria messages
+        val person = android.app.Person.Builder().setName("微信支付").build()
+        val messagingNotification = Notification.Builder(context, "pay")
+            .setContentTitle("微信支付")
+            .setStyle(
+                Notification.MessagingStyle(person)
+                    .addMessage("通过零钱扣款¥4.50 扣费服务 校园轻松付 扣费内容 松涛园1楼大众窗口19", postTime, person)
+                    .addMessage("通过零钱扣款¥4.50 扣费服务 校园轻松付 扣费内容 松涛园1楼大众窗口15", postTime + 15_000L, person)
+            )
+            .build()
+        @Suppress("DEPRECATION")
+        val msgSbn = StatusBarNotification(
+            "com.tencent.mm",
+            "com.tencent.mm",
+            202,
+            null,
+            0,
+            0,
+            0,
+            messagingNotification,
+            Process.myUserHandle(),
+            postTime + 15_000L
+        )
+        val msgPayloads = PaymentNotificationListenerService.extractPayloads(msgSbn)
+        assertEquals(2, msgPayloads.size)
+        assertEquals(postTime, msgPayloads[0].postedAtMillis)
+        assertEquals(postTime + 15_000L, msgPayloads[1].postedAtMillis)
+    }
+
+    @Test
+    fun `consecutive cafeteria auto-debit windows with same or different amounts are staged without false duplicates`() = runTest {
+        val t0 = 1_794_988_900_000L
+
+        // Window 19: ¥4.50
+        val c1 = repository.stagePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学 通过零钱扣款 ¥4.50 扣费服务 校园轻松付 扣费内容 松涛园1楼大众窗口19",
+            occurredAtMillis = t0
+        ).getOrThrow()
+
+        // Window 15: SAME amount ¥4.50 just 8 seconds later -> distinct window, MUST NOT be flagged duplicate
+        val c2 = repository.stagePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学 通过零钱扣款 ¥4.50 扣费服务 校园轻松付 扣费内容 松涛园1楼大众窗口15",
+            occurredAtMillis = t0 + 8_000L
+        ).getOrThrow()
+
+        // Generic 中山大学 ¥6.00 at +40s, then another generic 中山大学 ¥6.00 at +100s (60s apart -> distinct purchase)
+        val c3 = repository.stagePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学 通过零钱扣款 ¥6.00 扣费服务 校园轻松付",
+            occurredAtMillis = t0 + 40_000L
+        ).getOrThrow()
+        val c4 = repository.stagePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学 通过零钱扣款 ¥6.00 扣费服务 校园轻松付",
+            occurredAtMillis = t0 + 100_000L
+        ).getOrThrow()
+
+        // Confirm c3 to ledger, then stage another ¥3.50 at 中山大学 20s later -> MUST NOT be AMOUNT_MISMATCH
+        repository.confirmCandidateToLedger(c3.id, "food", FundingSource.LIVING_ALLOWANCE, false, "")
+        val c5 = repository.stagePaymentNotification(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "中山大学 通过零钱扣款 ¥3.50 扣费服务 校园轻松付",
+            occurredAtMillis = t0 + 120_000L
+        ).getOrThrow()
+
+        assertEquals(DiscrepancyType.NONE, c1.discrepancyType)
+        assertEquals("food", c1.suggestedCategoryId)
+        assertEquals(DiscrepancyType.NONE, c2.discrepancyType)
+        assertEquals("food", c2.suggestedCategoryId)
+        assertEquals(DiscrepancyType.NONE, c3.discrepancyType)
+        assertEquals(DiscrepancyType.NONE, c4.discrepancyType)
+        assertEquals(DiscrepancyType.NONE, c5.discrepancyType)
+        assertEquals("松涛园1楼大众窗口19", c1.merchant)
+        assertEquals("松涛园1楼大众窗口15", c2.merchant)
     }
 }

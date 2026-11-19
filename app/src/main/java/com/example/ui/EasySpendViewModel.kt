@@ -15,14 +15,18 @@ import com.example.ai.ProposalStatus
 import com.example.ai.SpendingInsightReport
 import com.example.ai.ToolExecutionResult
 import com.example.ai.toApiConfig
+import com.example.data.local.AccountState
 import com.example.data.local.ApiProviderType
 import com.example.data.local.EasySpendDatabase
+import com.example.data.local.LocalAccount
+import com.example.data.local.LocalAccountStore
 import com.example.data.local.ThemeMode
 import com.example.data.local.UserSettings
 import com.example.data.local.UserSettingsDataStore
 import com.example.data.model.AgentToolLogEntity
 import com.example.data.model.CandidateResolution
 import com.example.data.model.CategoryEntity
+import com.example.data.model.CategoryGroup
 import com.example.data.model.ClassificationSource
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportBatchEntity
@@ -33,20 +37,20 @@ import com.example.data.model.SavingsGoalEntity
 import com.example.data.model.TransactionDirection
 import com.example.data.model.TransactionEntity
 import com.example.data.repository.EasySpendRepository
-import com.example.domain.finance.BudgetAndForecastEngine
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
 import com.example.domain.finance.XlsxStatementParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -76,7 +80,16 @@ data class ApiTestFeedback(
     val isSuccess: Boolean = false
 )
 
+private fun defaultWelcomeMessages(): List<AgentChatMessage> = listOf(
+    AgentChatMessage(
+        isUser = false,
+        text = "你好，我是易支道财务助手。配置上方 API Key 后，可直接问我存钱空间、超支风险或预算调整建议："
+    )
+)
+
 data class EasySpendUiState(
+    val accountState: AccountState = AccountState(),
+    val authErrorMessage: String? = null,
     val settings: UserSettings = UserSettings(),
     val categories: List<CategoryEntity> = emptyList(),
     val transactions: List<TransactionEntity> = emptyList(),
@@ -91,53 +104,70 @@ data class EasySpendUiState(
     val isAgentResponding: Boolean = false,
     val agentProgressText: String? = null,
     val streamingAgentText: String = "",
-    val agentMessages: List<AgentChatMessage> = listOf(
-        AgentChatMessage(
-            isUser = false,
-            text = "你好，我是易支道财务助手。配置上方 API Key 后，可直接问我存钱空间、超支风险或预算调整建议："
-        )
-    ),
+    val agentMessages: List<AgentChatMessage> = defaultWelcomeMessages(),
     val apiTestFeedback: ApiTestFeedback = ApiTestFeedback(),
     val bannerMessage: String? = null
 )
 
+private data class AccountSession(
+    val account: LocalAccount,
+    val repository: EasySpendRepository,
+    val settingsStore: UserSettingsDataStore,
+    val aiService: EasySpendAiService
+)
+
+private data class TransientUiState(
+    val authError: String?,
+    val aiInsightState: AiInsightState,
+    val isAiClassifying: Boolean,
+    val isAgentResponding: Boolean,
+    val agentProgressText: String?,
+    val streamingAgentText: String,
+    val agentMessages: List<AgentChatMessage>,
+    val apiTestFeedback: ApiTestFeedback,
+    val bannerMessage: String?
+)
+
 class EasySpendViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = EasySpendDatabase.getInstance(application)
-    private val repository = EasySpendRepository(db)
-    private val settingsStore = UserSettingsDataStore(application)
-    private val aiService = EasySpendAiService(repository)
+    private val appContext = application.applicationContext
+    private val accountStore = LocalAccountStore(appContext)
 
+    @Volatile
+    private var activeSession: AccountSession? = null
+
+    private val _authErrorMessage = MutableStateFlow<String?>(null)
     private val _aiInsightState = MutableStateFlow<AiInsightState>(AiInsightState.Idle)
     private val _isAiClassifying = MutableStateFlow(false)
     private val _isAgentResponding = MutableStateFlow(false)
     private val _agentProgressText = MutableStateFlow<String?>(null)
     private val _streamingAgentText = MutableStateFlow("")
-    private val _agentMessages = MutableStateFlow(EasySpendUiState().agentMessages)
+    private val _agentMessages = MutableStateFlow(defaultWelcomeMessages())
     private val _apiTestFeedback = MutableStateFlow(ApiTestFeedback())
     private val _bannerMessage = MutableStateFlow<String?>(null)
 
     private val conversationHistory = mutableListOf<ConversationTurn>()
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private val monthDataFlow = settingsStore.settingsFlow.flatMapLatest { settings ->
-        combine(
-            repository.observeTransactionsForMonth(settings.activeMonthKey),
-            repository.observeMonthlySummary(settings.activeMonthKey),
-            repository.observeSavingsGoalForMonth(settings.activeMonthKey)
-        ) { txs, summary, goal ->
-            Triple(txs, summary, goal)
+    private fun getOrCreateSession(account: LocalAccount): AccountSession {
+        val current = activeSession
+        if (current != null && current.account.id == account.id) {
+            return current.copy(account = account).also { activeSession = it }
         }
+        val db = EasySpendDatabase.getInstanceForAccount(appContext, account.id)
+        val repo = EasySpendRepository(db)
+        val settingsStore = UserSettingsDataStore(appContext, account.id)
+        val aiService = EasySpendAiService(repo)
+        val created = AccountSession(account, repo, settingsStore, aiService)
+        activeSession = created
+        viewModelScope.launch {
+            val activeMonth = settingsStore.settingsFlow.first().activeMonthKey
+            repo.ensureInitialized(activeMonth)
+        }
+        return created
     }
 
-    val uiState: StateFlow<EasySpendUiState> = combine(
-        settingsStore.settingsFlow,
-        repository.categoriesFlow,
-        monthDataFlow,
-        repository.pendingCandidatesFlow,
-        repository.importBatchesFlow,
-        repository.merchantPreferencesFlow,
-        repository.toolLogsFlow,
+    private val transientFlow = combine(
+        _authErrorMessage,
         _aiInsightState,
         _isAiClassifying,
         _isAgentResponding,
@@ -146,86 +176,263 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _agentMessages,
         _apiTestFeedback,
         _bannerMessage
-    ) { values ->
-        val settings = values[0] as UserSettings
+    ) { arr ->
         @Suppress("UNCHECKED_CAST")
-        val categories = values[1] as List<CategoryEntity>
-        @Suppress("UNCHECKED_CAST")
-        val monthTriple = values[2] as Triple<List<TransactionEntity>, MonthlyFinancialSummary, SavingsGoalEntity?>
-        @Suppress("UNCHECKED_CAST")
-        val pendingCandidates = values[3] as List<ImportCandidateEntity>
-        @Suppress("UNCHECKED_CAST")
-        val batches = values[4] as List<ImportBatchEntity>
-        @Suppress("UNCHECKED_CAST")
-        val prefs = values[5] as List<MerchantPreferenceEntity>
-        @Suppress("UNCHECKED_CAST")
-        val logs = values[6] as List<AgentToolLogEntity>
-        val insight = values[7] as AiInsightState
-        val classifying = values[8] as Boolean
-        val responding = values[9] as Boolean
-        val progressText = values[10] as String?
-        val streamingText = values[11] as String
-        @Suppress("UNCHECKED_CAST")
-        val messages = values[12] as List<AgentChatMessage>
-        val apiTest = values[13] as ApiTestFeedback
-        val banner = values[14] as String?
-
-        EasySpendUiState(
-            settings = settings,
-            categories = categories,
-            transactions = monthTriple.first,
-            summary = monthTriple.second,
-            savingsGoal = monthTriple.third,
-            pendingCandidates = pendingCandidates,
-            importBatches = batches,
-            merchantPreferences = prefs,
-            toolLogs = logs,
-            aiInsightState = insight,
-            isAiClassifying = classifying,
-            isAgentResponding = responding,
-            agentProgressText = progressText,
-            streamingAgentText = streamingText,
-            agentMessages = messages,
-            apiTestFeedback = apiTest,
-            bannerMessage = banner
+        TransientUiState(
+            authError = arr[0] as String?,
+            aiInsightState = arr[1] as AiInsightState,
+            isAiClassifying = arr[2] as Boolean,
+            isAgentResponding = arr[3] as Boolean,
+            agentProgressText = arr[4] as String?,
+            streamingAgentText = arr[5] as String,
+            agentMessages = arr[6] as List<AgentChatMessage>,
+            apiTestFeedback = arr[7] as ApiTestFeedback,
+            bannerMessage = arr[8] as String?
         )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val uiState: StateFlow<EasySpendUiState> = accountStore.accountStateFlow.flatMapLatest { accState ->
+        val currentAcc = accState.currentAccount
+        if (currentAcc == null) {
+            activeSession = null
+            combine(flowOf(accState), transientFlow) { st, tr ->
+                EasySpendUiState(
+                    accountState = st,
+                    authErrorMessage = tr.authError,
+                    bannerMessage = tr.bannerMessage
+                )
+            }
+        } else {
+            val session = getOrCreateSession(currentAcc)
+            val repo = session.repository
+            val monthDataFlow = session.settingsStore.settingsFlow.flatMapLatest { settings ->
+                combine(
+                    repo.observeTransactionsForMonth(settings.activeMonthKey),
+                    repo.observeMonthlySummary(settings.activeMonthKey),
+                    repo.observeSavingsGoalForMonth(settings.activeMonthKey)
+                ) { txs, summary, goal ->
+                    Triple(txs, summary, goal)
+                }
+            }
+            combine(
+                session.settingsStore.settingsFlow,
+                repo.categoriesFlow,
+                monthDataFlow,
+                repo.pendingCandidatesFlow,
+                repo.importBatchesFlow,
+                repo.merchantPreferencesFlow,
+                repo.toolLogsFlow,
+                transientFlow
+            ) { values ->
+                val settings = values[0] as UserSettings
+                @Suppress("UNCHECKED_CAST")
+                val categories = values[1] as List<CategoryEntity>
+                @Suppress("UNCHECKED_CAST")
+                val monthTriple = values[2] as Triple<List<TransactionEntity>, MonthlyFinancialSummary, SavingsGoalEntity?>
+                @Suppress("UNCHECKED_CAST")
+                val pendingCandidates = values[3] as List<ImportCandidateEntity>
+                @Suppress("UNCHECKED_CAST")
+                val batches = values[4] as List<ImportBatchEntity>
+                @Suppress("UNCHECKED_CAST")
+                val prefs = values[5] as List<MerchantPreferenceEntity>
+                @Suppress("UNCHECKED_CAST")
+                val logs = values[6] as List<AgentToolLogEntity>
+                val tr = values[7] as TransientUiState
+
+                EasySpendUiState(
+                    accountState = accState,
+                    authErrorMessage = tr.authError,
+                    settings = settings,
+                    categories = categories,
+                    transactions = monthTriple.first,
+                    summary = monthTriple.second,
+                    savingsGoal = monthTriple.third,
+                    pendingCandidates = pendingCandidates,
+                    importBatches = batches,
+                    merchantPreferences = prefs,
+                    toolLogs = logs,
+                    aiInsightState = tr.aiInsightState,
+                    isAiClassifying = tr.isAiClassifying,
+                    isAgentResponding = tr.isAgentResponding,
+                    agentProgressText = tr.agentProgressText,
+                    streamingAgentText = tr.streamingAgentText,
+                    agentMessages = tr.agentMessages,
+                    apiTestFeedback = tr.apiTestFeedback,
+                    bannerMessage = tr.bannerMessage
+                )
+            }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000L),
         initialValue = EasySpendUiState()
     )
 
-    init {
+    private fun resetSessionTransientState() {
+        conversationHistory.clear()
+        _aiInsightState.value = AiInsightState.Idle
+        _isAiClassifying.value = false
+        _isAgentResponding.value = false
+        _agentProgressText.value = null
+        _streamingAgentText.value = ""
+        _agentMessages.value = defaultWelcomeMessages()
+        _apiTestFeedback.value = ApiTestFeedback()
+        _authErrorMessage.value = null
+    }
+
+    // --- Account Authentication & Management ---
+
+    fun clearAuthError() {
+        _authErrorMessage.value = null
+    }
+
+    fun registerAccount(username: String, password: String, nickname: String) {
         viewModelScope.launch {
-            val activeMonth = settingsStore.settingsFlow.first().activeMonthKey
-            repository.ensureInitialized(activeMonth)
+            _authErrorMessage.value = null
+            val res = accountStore.register(username, password, nickname)
+            res.onSuccess { acc ->
+                resetSessionTransientState()
+                getOrCreateSession(acc)
+                _bannerMessage.value = "欢迎，${acc.displayLabel}！已为您创建独立的本地账本空间。"
+            }.onFailure { err ->
+                _authErrorMessage.value = err.localizedMessage ?: "注册失败，请检查输入"
+            }
         }
     }
+
+    fun loginAccount(username: String, password: String) {
+        viewModelScope.launch {
+            _authErrorMessage.value = null
+            val res = accountStore.login(username, password)
+            res.onSuccess { acc ->
+                resetSessionTransientState()
+                getOrCreateSession(acc)
+                _bannerMessage.value = "欢迎回来，${acc.displayLabel}！"
+            }.onFailure { err ->
+                _authErrorMessage.value = err.localizedMessage ?: "登录失败"
+            }
+        }
+    }
+
+    fun logoutAccount() {
+        viewModelScope.launch {
+            accountStore.logout()
+            activeSession = null
+            resetSessionTransientState()
+            _bannerMessage.value = null
+        }
+    }
+
+    fun updateAccountNickname(newNickname: String) {
+        val currentAcc = activeSession?.account ?: return
+        viewModelScope.launch {
+            val res = accountStore.updateNickname(currentAcc.id, newNickname)
+            res.onSuccess { updated ->
+                _bannerMessage.value = "昵称已更新为「${updated.displayLabel}」。"
+            }.onFailure { err ->
+                _bannerMessage.value = err.localizedMessage ?: "修改昵称失败"
+            }
+        }
+    }
+
+    fun changeAccountPassword(oldPassword: String, newPassword: String) {
+        val currentAcc = activeSession?.account ?: return
+        viewModelScope.launch {
+            val res = accountStore.changePassword(currentAcc.id, oldPassword, newPassword)
+            res.onSuccess {
+                _bannerMessage.value = "登录密码已安全更新。"
+            }.onFailure { err ->
+                _bannerMessage.value = err.localizedMessage ?: "修改密码失败"
+            }
+        }
+    }
+
+    // --- Custom Category Management ---
+
+    fun createCustomCategory(
+        name: String,
+        group: CategoryGroup,
+        keywords: String,
+        monthlyLimitYuanStr: String
+    ) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            val month = uiState.value.settings.activeMonthKey
+            val limitFen = if (monthlyLimitYuanStr.isBlank()) null else MoneyFormatter.parseYuanToFen(monthlyLimitYuanStr)
+            val res = session.repository.createCustomCategory(
+                name = name,
+                group = group,
+                keywords = keywords,
+                monthlyLimitFen = limitFen,
+                monthKey = month
+            )
+            res.onSuccess { cat ->
+                _bannerMessage.value = "已创建自定义分类「${cat.name}」。"
+            }.onFailure { err ->
+                _bannerMessage.value = err.localizedMessage ?: "创建分类失败"
+            }
+        }
+    }
+
+    fun updateCustomCategory(
+        categoryId: String,
+        name: String,
+        group: CategoryGroup,
+        keywords: String
+    ) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            val res = session.repository.updateCustomCategory(categoryId, name, group, keywords)
+            res.onSuccess { cat ->
+                _bannerMessage.value = "已更新分类「${cat.name}」。"
+            }.onFailure { err ->
+                _bannerMessage.value = err.localizedMessage ?: "更新分类失败"
+            }
+        }
+    }
+
+    fun deleteCustomCategory(categoryId: String) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            val res = session.repository.deleteCustomCategory(categoryId)
+            res.onSuccess {
+                _bannerMessage.value = "已删除该自定义分类，原记录已自动移至其他分类。"
+            }.onFailure { err ->
+                _bannerMessage.value = err.localizedMessage ?: "删除分类失败"
+            }
+        }
+    }
+
+    // --- Core Ledger, Demo, Import, Budget & Agent Actions ---
 
     fun clearBanner() {
         _bannerMessage.value = null
     }
 
     fun loadDemoIntoReviewQueue() {
+        val session = activeSession ?: return
         viewModelScope.launch {
             val month = uiState.value.settings.activeMonthKey
-            repository.loadCompetitionDemoIntoQueue(month)
+            session.repository.loadCompetitionDemoIntoQueue(month)
             _bannerMessage.value = "已加载演示账单到「待核对」，你可以逐笔体验查重与分类确认。"
         }
     }
 
     fun loadDemoCommittedBaseline() {
+        val session = activeSession ?: return
         viewModelScope.launch {
             val month = uiState.value.settings.activeMonthKey
-            repository.loadCompetitionDemoCommittedBaseline(month)
+            session.repository.loadCompetitionDemoCommittedBaseline(month)
             _bannerMessage.value = "已载入本月体验账单，其中几笔重复和退款记录已留在「待核对」等你处理。"
         }
     }
 
     fun addDemo300EssentialExpense() {
+        val session = activeSession ?: return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            repository.addManualTransaction(
+            session.repository.addManualTransaction(
                 amountFen = 30000L,
                 direction = TransactionDirection.EXPENSE,
                 channel = PaymentChannel.WECHAT_PAY,
@@ -240,6 +447,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun importCsvFromUri(context: Context, uri: Uri, preferredChannel: PaymentChannel? = null) {
+        val session = activeSession ?: return
         viewModelScope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) {
@@ -249,14 +457,14 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                 val isXlsx = XlsxStatementParser.isXlsxBytes(bytes)
                 val sourceLabel = "${preferredChannel?.displayName ?: "账单"}${if (isXlsx) "Excel" else "CSV"}导入"
                 val result = if (isXlsx) {
-                    repository.importXlsxIntoReviewQueue(
+                    session.repository.importXlsxIntoReviewQueue(
                         xlsxBytes = bytes,
                         sourceLabel = sourceLabel,
                         preferredChannel = preferredChannel
                     )
                 } else {
                     val content = withContext(Dispatchers.Default) { decodeStatementBytes(bytes) }
-                    repository.importCsvIntoReviewQueue(
+                    session.repository.importCsvIntoReviewQueue(
                         csvContent = content,
                         sourceLabel = sourceLabel,
                         preferredChannel = preferredChannel
@@ -275,21 +483,22 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun simulatePaymentNotification(isWeChat: Boolean) {
+        val session = activeSession ?: return
         viewModelScope.launch {
             val (pkg, title, text) = if (isWeChat) {
                 Triple(
                     "com.tencent.mm",
                     "微信支付",
-                    "已向 美团外卖 支付人民币28.50元（来自通知监听POC）"
+                    "已向 美团 支付人民币22.50元（来自通知监听POC）"
                 )
             } else {
                 Triple(
                     "com.eg.android.AlipayGphone",
                     "支付宝",
-                    "你通过支付宝向 中大学一食堂 付款15.00元（来自通知监听POC）"
+                    "你通过支付宝向 美团 付款1.80元（来自通知监听POC）"
                 )
             }
-            val res = repository.stageSimulatedNotification(pkg, title, text)
+            val res = session.repository.stageSimulatedNotification(pkg, title, text)
             res.onSuccess {
                 _bannerMessage.value = "已捕获 ${it.channel.displayName} 通知「${it.merchant} ${MoneyFormatter.formatFen(it.amountFen)}」，已加入待核对队列。"
             }.onFailure {
@@ -305,8 +514,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         rememberMerchant: Boolean,
         note: String
     ) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.confirmCandidateToLedger(
+            session.repository.confirmCandidateToLedger(
                 candidateId = candidateId,
                 selectedCategoryId = categoryId,
                 selectedFundingSource = fundingSource,
@@ -318,15 +528,17 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun confirmAllCleanCandidates() {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.confirmAllCleanCandidates()
+            session.repository.confirmAllCleanCandidates()
             _bannerMessage.value = "已批量确认所有无冲突的清晰交易。"
         }
     }
 
     fun skipOrDismissCandidate(candidateId: Long, resolution: CandidateResolution) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.resolveCandidateAsSkipOrDismiss(candidateId, resolution)
+            session.repository.resolveCandidateAsSkipOrDismiss(candidateId, resolution)
             _bannerMessage.value = if (resolution == CandidateResolution.MERGED_SKIP) {
                 "已标记为重复并合并跳过，账本不重复入账。"
             } else {
@@ -336,6 +548,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun runAiBatchClassification() {
+        val session = activeSession ?: return
         val state = uiState.value
         if (!state.settings.aiCloudAnalysisEnabled) {
             _bannerMessage.value = "当前已关闭云端 AI 分析授权，请先在右上角设置中开启后再使用 AI 预分类。"
@@ -354,9 +567,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isAiClassifying.value = true
             try {
-                val suggestions = aiService.suggestCategoriesForCandidates(pending, state.categories, apiConfig)
+                val suggestions = session.aiService.suggestCategoriesForCandidates(pending, state.categories, apiConfig)
                 for (s in suggestions) {
-                    repository.updateCandidateSuggestion(
+                    session.repository.updateCandidateSuggestion(
                         candidateId = s.candidateId,
                         categoryId = s.suggestedCategoryId,
                         confidence = s.confidence,
@@ -387,13 +600,14 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         merchant: String,
         note: String
     ) {
+        val session = activeSession ?: return
         val fen = MoneyFormatter.parseYuanToFen(amountYuanStr)
         if (fen == null || fen <= 0L) {
             _bannerMessage.value = "请输入有效的大于 0 的金额。"
             return
         }
         viewModelScope.launch {
-            repository.addManualTransaction(
+            session.repository.addManualTransaction(
                 amountFen = fen,
                 direction = direction,
                 channel = channel,
@@ -407,20 +621,23 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updateTransactionCategory(txId: Long, categoryId: String, rememberMerchant: Boolean) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.updateTransactionCategory(txId, categoryId, rememberMerchant)
+            session.repository.updateTransactionCategory(txId, categoryId, rememberMerchant)
             _bannerMessage.value = "交易分类已更新并记录。"
         }
     }
 
     fun deleteTransaction(txId: Long) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.deleteTransaction(txId)
+            session.repository.deleteTransaction(txId)
             _bannerMessage.value = "已删除该条交易记录。"
         }
     }
 
     fun updateBudgetLimit(categoryId: String, limitYuanStr: String) {
+        val session = activeSession ?: return
         val fen = MoneyFormatter.parseYuanToFen(limitYuanStr)
         if (fen == null || fen < 0L) {
             _bannerMessage.value = "请输入合法的预算金额。"
@@ -428,20 +645,22 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             val month = uiState.value.settings.activeMonthKey
-            repository.updateBudgetLimit(month, categoryId, fen)
+            session.repository.updateBudgetLimit(month, categoryId, fen)
             _bannerMessage.value = "预算额度已更新。"
         }
     }
 
     fun applyDeterministicProposal(categoryId: String, newLimitFen: Long) {
+        val session = activeSession ?: return
         viewModelScope.launch {
             val month = uiState.value.settings.activeMonthKey
-            repository.updateBudgetLimit(month, categoryId, newLimitFen)
+            session.repository.updateBudgetLimit(month, categoryId, newLimitFen)
             _bannerMessage.value = "已按您的确认更新该分类预算为 ${MoneyFormatter.formatFen(newLimitFen)}。"
         }
     }
 
     fun updateSavingsGoal(targetYuanStr: String, allowanceYuanStr: String, partTimeExpectedYuanStr: String) {
+        val session = activeSession ?: return
         val targetFen = MoneyFormatter.parseYuanToFen(targetYuanStr)
         val allowanceFen = MoneyFormatter.parseYuanToFen(allowanceYuanStr)
         val partTimeFen = MoneyFormatter.parseYuanToFen(partTimeExpectedYuanStr)
@@ -451,12 +670,13 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             val month = uiState.value.settings.activeMonthKey
-            repository.updateSavingsGoal(month, targetFen, allowanceFen, partTimeFen)
+            session.repository.updateSavingsGoal(month, targetFen, allowanceFen, partTimeFen)
             _bannerMessage.value = "储蓄挑战目标与月度收入基线已更新。"
         }
     }
 
     fun generateAiInsights() {
+        val session = activeSession ?: return
         val state = uiState.value
         if (!state.settings.aiCloudAnalysisEnabled) {
             _aiInsightState.value = AiInsightState.Error("当前已关闭云端 AI 分析授权，请在设置中开启「允许 AI 分析脱敏账单」后再生成洞察。")
@@ -470,7 +690,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _aiInsightState.value = AiInsightState.Loading
             try {
-                val report = aiService.generateSpendingInsights(state.settings.activeMonthKey, apiConfig)
+                val report = session.aiService.generateSpendingInsights(state.settings.activeMonthKey, apiConfig)
                 _aiInsightState.value = AiInsightState.Success(report)
             } catch (e: TimeoutCancellationException) {
                 _aiInsightState.value = AiInsightState.Error("AI 消费分析超时（60秒），请检查网络后重试。")
@@ -486,6 +706,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun sendAgentMessage(prompt: String) {
+        val session = activeSession ?: return
         val trimmed = prompt.trim()
         if (trimmed.isEmpty() || _isAgentResponding.value) return
 
@@ -519,7 +740,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             _agentProgressText.value = "正在连接 ${apiConfig.model} 并规划查账工具..."
             _streamingAgentText.value = ""
             try {
-                val reply: AgentChatReply = aiService.askFinancialAgent(
+                val reply: AgentChatReply = session.aiService.askFinancialAgent(
                     userPrompt = trimmed,
                     monthKey = state.settings.activeMonthKey,
                     config = apiConfig,
@@ -566,9 +787,10 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun confirmAgentProposal(messageId: String, proposal: PendingBudgetProposal) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            repository.updateBudgetLimit(proposal.monthKey, proposal.categoryId, proposal.proposedLimitFen)
-            repository.logToolCall(
+            session.repository.updateBudgetLimit(proposal.monthKey, proposal.categoryId, proposal.proposedLimitFen)
+            session.repository.logToolCall(
                 sessionId = "user_confirm",
                 toolName = "apply_budget_change_confirmed",
                 argumentsJson = "{\"categoryId\":\"${proposal.categoryId}\",\"newLimitFen\":${proposal.proposedLimitFen}}",
@@ -607,21 +829,24 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setDailyReviewTime(hour: Int, minute: Int) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            settingsStore.setDailyReviewTime(hour, minute)
+            session.settingsStore.setDailyReviewTime(hour, minute)
             _bannerMessage.value = String.format("每日集中对账提醒时间已设为 %02d:%02d", hour, minute)
         }
     }
 
     fun setAiCloudAnalysisEnabled(enabled: Boolean) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            settingsStore.setAiCloudAnalysisEnabled(enabled)
+            session.settingsStore.setAiCloudAnalysisEnabled(enabled)
         }
     }
 
     fun setThemeMode(mode: ThemeMode) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            settingsStore.setThemeMode(mode)
+            session.settingsStore.setThemeMode(mode)
         }
     }
 
@@ -635,8 +860,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setHideBeginnerGuide(hidden: Boolean) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            settingsStore.setHideBeginnerGuide(hidden)
+            session.settingsStore.setHideBeginnerGuide(hidden)
         }
     }
 
@@ -646,8 +872,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         apiKey: String,
         model: String
     ) {
+        val session = activeSession ?: return
         viewModelScope.launch {
-            settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
+            session.settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
             _apiTestFeedback.value = ApiTestFeedback()
             _bannerMessage.value = "已保存 ${provider.label}（$model）API 配置。"
         }
@@ -659,12 +886,13 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         apiKey: String,
         model: String
     ) {
+        val session = activeSession ?: return
         viewModelScope.launch {
             _apiTestFeedback.value = ApiTestFeedback(isTesting = true, message = "正在测试接口连通性...")
             val cfg = ApiConfig(provider, baseUrl.trim(), apiKey.trim(), model.trim())
-            val res = aiService.testConnection(cfg)
+            val res = session.aiService.testConnection(cfg)
             res.onSuccess { msg ->
-                settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
+                session.settingsStore.saveApiConfig(provider, baseUrl, apiKey, model)
                 _apiTestFeedback.value = ApiTestFeedback(isTesting = false, message = msg, isSuccess = true)
             }.onFailure { err ->
                 _apiTestFeedback.value = ApiTestFeedback(

@@ -10,4 +10,6 @@
     <string name="cd_toggle_theme">切换深浅色模式</string>
     <string name="cd_send_message">发送消息</string>
     <string name="cd_close">关闭</string>
+    <string name="cd_account">账号管理</string>
+    <string name="cd_manage_categories">管理自定义分类</string>
 </resources>

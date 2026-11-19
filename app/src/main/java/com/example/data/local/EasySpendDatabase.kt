@@ -6,6 +6,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import java.util.concurrent.ConcurrentHashMap
 import com.example.data.model.AgentToolLogEntity
 import com.example.data.model.BudgetEntity
 import com.example.data.model.CandidateResolution
@@ -64,7 +67,7 @@ class RoomTypeConverters {
         MerchantPreferenceEntity::class,
         AgentToolLogEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(RoomTypeConverters::class)
@@ -78,16 +81,43 @@ abstract class EasySpendDatabase : RoomDatabase() {
     abstract fun toolLogDao(): ToolLogDao
 
     companion object {
-        @Volatile
-        private var INSTANCE: EasySpendDatabase? = null
+        const val DEFAULT_DB_NAME = "easyspend.db"
 
-        fun getInstance(context: Context): EasySpendDatabase {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
+        private val instances = ConcurrentHashMap<String, EasySpendDatabase>()
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN isCustom INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE categories ADD COLUMN keywords TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        fun dbNameForAccount(accountId: String): String {
+            val safeId = accountId.replace(Regex("[^a-zA-Z0-9_-]"), "")
+            return "easyspend_acct_${safeId.ifBlank { "default" }}.db"
+        }
+
+        fun getInstance(context: Context, dbName: String = DEFAULT_DB_NAME): EasySpendDatabase {
+            return instances[dbName] ?: synchronized(this) {
+                instances[dbName] ?: Room.databaseBuilder(
                     context.applicationContext,
                     EasySpendDatabase::class.java,
-                    "easyspend.db"
-                ).build().also { INSTANCE = it }
+                    dbName
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instances[dbName] = it }
+            }
+        }
+
+        fun getInstanceForAccount(context: Context, accountId: String): EasySpendDatabase {
+            return getInstance(context, dbNameForAccount(accountId))
+        }
+
+        fun closeAllForTests() {
+            synchronized(this) {
+                instances.values.forEach { runCatching { it.close() } }
+                instances.clear()
             }
         }
     }

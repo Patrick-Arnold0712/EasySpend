@@ -68,80 +68,84 @@ data class UserSettings(
         get() = apiKey.isNotBlank() && apiBaseUrl.isNotBlank() && apiModel.isNotBlank()
 }
 
-class UserSettingsDataStore(private val context: Context) {
+class UserSettingsDataStore(
+    private val context: Context,
+    private val accountId: String? = null
+) {
 
-    private object Keys {
-        val ACTIVE_MONTH = stringPreferencesKey("active_month")
-        val REVIEW_HOUR = intPreferencesKey("review_hour")
-        val REVIEW_MINUTE = intPreferencesKey("review_minute")
-        val AI_CLOUD_ENABLED = booleanPreferencesKey("ai_cloud_enabled")
-        val NOTIFICATION_CAPTURE_ENABLED = booleanPreferencesKey("notification_capture_enabled")
-        val THEME_MODE = stringPreferencesKey("theme_mode")
-        val HIDE_BEGINNER_GUIDE = booleanPreferencesKey("hide_beginner_guide")
-        val API_PROVIDER = stringPreferencesKey("api_provider")
-        val API_BASE_URL = stringPreferencesKey("api_base_url")
-        val API_KEY = stringPreferencesKey("api_key")
-        val API_MODEL = stringPreferencesKey("api_model")
-    }
+    private fun prefix(key: String): String =
+        if (accountId.isNullOrBlank()) key else "acct_${accountId}_$key"
+
+    private val activeMonthKey = stringPreferencesKey(prefix("active_month"))
+    private val reviewHourKey = intPreferencesKey(prefix("review_hour"))
+    private val reviewMinuteKey = intPreferencesKey(prefix("review_minute"))
+    private val aiCloudEnabledKey = booleanPreferencesKey(prefix("ai_cloud_enabled"))
+    private val notificationCaptureEnabledKey = booleanPreferencesKey(prefix("notification_capture_enabled"))
+    private val themeModeKey = stringPreferencesKey(prefix("theme_mode"))
+    private val hideBeginnerGuideKey = booleanPreferencesKey(prefix("hide_beginner_guide"))
+    private val apiProviderKey = stringPreferencesKey(prefix("api_provider"))
+    private val apiBaseUrlKey = stringPreferencesKey(prefix("api_base_url"))
+    private val apiKeyPref = stringPreferencesKey(prefix("api_key"))
+    private val apiModelKey = stringPreferencesKey(prefix("api_model"))
 
     val settingsFlow: Flow<UserSettings> = context.settingsDataStore.data.map { prefs ->
-        val rawTheme = prefs[Keys.THEME_MODE]
+        val rawTheme = prefs[themeModeKey]
         val parsedTheme = runCatching { if (rawTheme != null) ThemeMode.valueOf(rawTheme) else ThemeMode.SYSTEM }
             .getOrDefault(ThemeMode.SYSTEM)
-        val rawProvider = prefs[Keys.API_PROVIDER]
+        val rawProvider = prefs[apiProviderKey]
         val parsedProvider = runCatching {
             if (rawProvider != null) ApiProviderType.valueOf(rawProvider) else ApiProviderType.DEEPSEEK
         }.getOrDefault(ApiProviderType.DEEPSEEK)
 
         UserSettings(
-            activeMonthKey = prefs[Keys.ACTIVE_MONTH] ?: "2026-11",
-            dailyReviewHour = prefs[Keys.REVIEW_HOUR] ?: 21,
-            dailyReviewMinute = prefs[Keys.REVIEW_MINUTE] ?: 30,
-            aiCloudAnalysisEnabled = prefs[Keys.AI_CLOUD_ENABLED] ?: true,
-            notificationCaptureEnabled = prefs[Keys.NOTIFICATION_CAPTURE_ENABLED] ?: true,
+            activeMonthKey = prefs[activeMonthKey] ?: "2026-11",
+            dailyReviewHour = prefs[reviewHourKey] ?: 21,
+            dailyReviewMinute = prefs[reviewMinuteKey] ?: 30,
+            aiCloudAnalysisEnabled = prefs[aiCloudEnabledKey] ?: true,
+            notificationCaptureEnabled = prefs[notificationCaptureEnabledKey] ?: true,
             themeMode = parsedTheme,
-            hideBeginnerGuide = prefs[Keys.HIDE_BEGINNER_GUIDE] ?: false,
+            hideBeginnerGuide = prefs[hideBeginnerGuideKey] ?: false,
             apiProvider = parsedProvider,
-            apiBaseUrl = prefs[Keys.API_BASE_URL]?.ifBlank { parsedProvider.defaultBaseUrl } ?: parsedProvider.defaultBaseUrl,
-            apiKey = prefs[Keys.API_KEY] ?: "",
-            apiModel = prefs[Keys.API_MODEL]?.ifBlank { parsedProvider.defaultModel } ?: parsedProvider.defaultModel
+            apiBaseUrl = prefs[apiBaseUrlKey]?.ifBlank { parsedProvider.defaultBaseUrl } ?: parsedProvider.defaultBaseUrl,
+            apiKey = prefs[apiKeyPref] ?: "",
+            apiModel = prefs[apiModelKey]?.ifBlank { parsedProvider.defaultModel } ?: parsedProvider.defaultModel
         )
     }
 
     suspend fun setDailyReviewTime(hour: Int, minute: Int) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.REVIEW_HOUR] = hour.coerceIn(0, 23)
-            prefs[Keys.REVIEW_MINUTE] = minute.coerceIn(0, 59)
+            prefs[reviewHourKey] = hour.coerceIn(0, 23)
+            prefs[reviewMinuteKey] = minute.coerceIn(0, 59)
         }
     }
 
     suspend fun setAiCloudAnalysisEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.AI_CLOUD_ENABLED] = enabled
+            prefs[aiCloudEnabledKey] = enabled
         }
     }
 
     suspend fun setNotificationCaptureEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.NOTIFICATION_CAPTURE_ENABLED] = enabled
+            prefs[notificationCaptureEnabledKey] = enabled
         }
     }
 
     suspend fun setActiveMonth(monthKey: String) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.ACTIVE_MONTH] = monthKey
+            prefs[activeMonthKey] = monthKey
         }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.THEME_MODE] = mode.name
+            prefs[themeModeKey] = mode.name
         }
     }
 
     suspend fun setHideBeginnerGuide(hidden: Boolean) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.HIDE_BEGINNER_GUIDE] = hidden
+            prefs[hideBeginnerGuideKey] = hidden
         }
     }
 
@@ -152,10 +156,10 @@ class UserSettingsDataStore(private val context: Context) {
         model: String
     ) {
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.API_PROVIDER] = provider.name
-            prefs[Keys.API_BASE_URL] = baseUrl.trim().trimEnd('/')
-            prefs[Keys.API_KEY] = apiKey.trim()
-            prefs[Keys.API_MODEL] = model.trim()
+            prefs[apiProviderKey] = provider.name
+            prefs[apiBaseUrlKey] = baseUrl.trim().trimEnd('/')
+            prefs[apiKeyPref] = apiKey.trim()
+            prefs[apiModelKey] = model.trim()
         }
     }
 }
