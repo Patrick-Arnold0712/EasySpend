@@ -94,22 +94,13 @@ fun MonthlyCategoryBreakdownCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
+                Text(
+                    text = "$monthKey 分类消费分布",
+                    style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier
                         .weight(1f)
-                        .padding(end = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = "$monthKey 月度分类消费分布",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "点击图表分区或分类行可查看详情",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                        .padding(end = 8.dp)
+                )
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = RoundedCornerShape(12.dp)

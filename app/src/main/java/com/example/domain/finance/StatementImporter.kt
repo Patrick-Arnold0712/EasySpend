@@ -3,6 +3,7 @@ package com.example.domain.finance
 import com.example.data.model.CandidateResolution
 import com.example.data.model.CategoryEntity
 import com.example.data.model.DiscrepancyType
+import com.example.data.model.FundVault
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportCandidateEntity
 import com.example.data.model.MerchantPreferenceEntity
@@ -23,7 +24,10 @@ data class ParsedRawRecord(
     val fundingSource: FundingSource,
     val sourceType: TransactionSourceType,
     val merchant: String,
-    val rawDescription: String
+    val rawDescription: String,
+    val note: String = "",
+    val fundVault: FundVault = FundVault.POCKET,
+    val locationLabel: String = ""
 )
 
 object StatementImporter {
@@ -97,6 +101,10 @@ object StatementImporter {
         val amountIdx = headers.indexOfFirst { it.contains("金额") || it.equals("amount", true) }
         val statusIdx = headers.indexOfFirst { it.contains("状态") || it.equals("status", true) }
         val refIdx = headers.indexOfFirst { it.contains("交易单号") || it.contains("交易订单号") || it.equals("id", true) }
+        val payChannelIdx = headers.indexOfFirst { it.contains("支付方式") || it.equals("channel", true) }
+        val noteIdx = headers.indexOfFirst { it == "备注" || it.equals("note", true) }
+        val vaultIdx = headers.indexOfFirst { it.contains("资金库") || it.equals("vault", true) || it == "库" }
+        val locationIdx = headers.indexOfFirst { it.contains("消费地点") || it.contains("地点") || it.equals("location", true) }
 
         if (timeIdx == -1 || amountIdx == -1) return emptyList()
 
@@ -114,12 +122,22 @@ object StatementImporter {
             val dirStr = cols.getOrNull(dirIdx)?.trim().orEmpty()
             val txTypeStr = cols.getOrNull(txTypeIdx)?.trim().orEmpty()
             val statusStr = cols.getOrNull(statusIdx)?.trim().orEmpty()
+            val payChannelStr = cols.getOrNull(payChannelIdx)?.trim().orEmpty()
+            val noteStr = cols.getOrNull(noteIdx)?.trim().orEmpty().let { if (it == "/") "" else it }
             val merchant = cols.getOrNull(merchantIdx)?.trim().orEmpty().ifBlank { "未知商户" }
             val rawGoods = cols.getOrNull(descIdx)?.trim().orEmpty().let { if (it == "/") "" else it }
             val desc = when {
                 rawGoods.isNotBlank() -> rawGoods
                 txTypeStr.isNotBlank() -> txTypeStr
                 else -> ""
+            }
+
+            val rowChannel = when {
+                payChannelStr.contains("微信") || payChannelStr.contains("零钱") -> PaymentChannel.WECHAT_PAY
+                payChannelStr.contains("支付宝") || payChannelStr.contains("花呗") -> PaymentChannel.ALIPAY
+                payChannelStr.contains("银行") || payChannelStr.contains("储蓄卡") || payChannelStr.contains("信用卡") -> PaymentChannel.BANK_CARD
+                payChannelStr.contains("现金") -> PaymentChannel.CASH
+                else -> channel
             }
 
             val direction = when {
@@ -142,8 +160,18 @@ object StatementImporter {
                 else -> FundingSource.UNASSIGNED
             }
 
+            val vaultStr = cols.getOrNull(vaultIdx)?.trim().orEmpty()
+            val locationStr = cols.getOrNull(locationIdx)?.trim().orEmpty().let { if (it == "/") "" else it }
+            val inferredVault = inferDefaultVault(
+                explicitVaultText = vaultStr,
+                merchant = merchant,
+                description = desc,
+                note = noteStr,
+                payChannelStr = payChannelStr
+            )
+
             val refId = cols.getOrNull(refIdx)?.trim()?.takeIf { it.isNotBlank() && it != "/" }
-                ?: "${channel.name}_${millis}_${amountFen}_${merchant.hashCode()}"
+                ?: "${rowChannel.name}_${millis}_${amountFen}_${merchant.hashCode()}"
 
             records.add(
                 ParsedRawRecord(
@@ -151,15 +179,46 @@ object StatementImporter {
                     occurredAtMillis = millis,
                     amountFen = amountFen,
                     direction = direction,
-                    channel = channel,
+                    channel = rowChannel,
                     fundingSource = fundingSource,
                     sourceType = sourceType,
                     merchant = merchant,
-                    rawDescription = if (statusStr.isNotBlank()) "$desc ($statusStr)".trim() else desc
+                    rawDescription = if (statusStr.isNotBlank()) "$desc ($statusStr)".trim() else desc,
+                    note = noteStr,
+                    fundVault = inferredVault,
+                    locationLabel = locationStr
                 )
             )
         }
         return records
+    }
+
+    internal fun inferDefaultVault(
+        explicitVaultText: String = "",
+        merchant: String = "",
+        description: String = "",
+        note: String = "",
+        payChannelStr: String = ""
+    ): FundVault {
+        val explicit = explicitVaultText.trim()
+        if (explicit.contains("储蓄") || explicit.equals("SAVINGS", ignoreCase = true)) {
+            return FundVault.SAVINGS
+        }
+        if (explicit.contains("零花") || explicit.equals("POCKET", ignoreCase = true)) {
+            return FundVault.POCKET
+        }
+        val combined = "$merchant $description $note $payChannelStr".lowercase()
+        return if (
+            combined.contains("储蓄") ||
+            combined.contains("定期存款") ||
+            combined.contains("奖学金") ||
+            combined.contains("攒钱") ||
+            combined.contains("理财收益")
+        ) {
+            FundVault.SAVINGS
+        } else {
+            FundVault.POCKET
+        }
     }
 
     private val strictNonPaymentNoiseKeywords = listOf(
@@ -205,7 +264,8 @@ object StatementImporter {
         packageName: String,
         title: String,
         text: String,
-        nowMillis: Long = System.currentTimeMillis()
+        nowMillis: Long = System.currentTimeMillis(),
+        locationLabel: String = ""
     ): ParsedRawRecord? {
         val cleanTitle = leadingBundlePrefixRegex.replace(title.trim(), "").trim()
         val cleanText = leadingBundlePrefixRegex.replace(text.trim(), "").trim()
@@ -231,9 +291,19 @@ object StatementImporter {
         val amountFen = MoneyFormatter.parseYuanToFen(rawAmount) ?: return null
         if (amountFen <= 0L) return null
 
+        val hasExplicitExpensePhrase =
+            combined.contains("已向") ||
+                combined.contains("付款") ||
+                combined.contains("支付人民币") ||
+                combined.contains("支付￥") ||
+                combined.contains("支付¥") ||
+                combined.contains("扣款") ||
+                combined.contains("扣费") ||
+                combined.contains("消费")
         val direction = when {
             combined.contains("退款") -> TransactionDirection.REFUND
-            combined.contains("收款") || combined.contains("到账") || combined.contains("转入") -> TransactionDirection.INCOME
+            !hasExplicitExpensePhrase &&
+                (combined.contains("收款") || combined.contains("到账") || combined.contains("转入")) -> TransactionDirection.INCOME
             combined.contains("转出") || combined.contains("提现") -> TransactionDirection.TRANSFER
             else -> TransactionDirection.EXPENSE
         }
@@ -251,7 +321,9 @@ object StatementImporter {
             fundingSource = if (direction == TransactionDirection.INCOME) FundingSource.PART_TIME_INCOME else FundingSource.LIVING_ALLOWANCE,
             sourceType = TransactionSourceType.NOTIFICATION_CAPTURE,
             merchant = merchant,
-            rawDescription = normalizedBody.take(160)
+            rawDescription = normalizedBody.take(160),
+            fundVault = inferDefaultVault(merchant = merchant, description = normalizedBody),
+            locationLabel = locationLabel.trim()
         )
     }
 
@@ -348,7 +420,12 @@ object StatementImporter {
                 direction = rec.direction,
                 preferences = preferences,
                 amountFen = rec.amountFen,
-                customCategories = customCategories
+                customCategories = customCategories,
+                occurredAtMillis = rec.occurredAtMillis,
+                channel = rec.channel,
+                note = rec.note,
+                historicalTransactions = existingTransactions,
+                locationLabel = rec.locationLabel
             )
 
             // 1. Exact externalRefId duplicate check (ledger + pending queue + earlier in same batch)
@@ -493,7 +570,9 @@ object StatementImporter {
                 discrepancyType = discrepancyType,
                 matchedTransactionId = matchedId,
                 discrepancyNote = discrepancyNote,
-                resolutionStatus = CandidateResolution.PENDING
+                resolutionStatus = CandidateResolution.PENDING,
+                fundVault = rec.fundVault,
+                locationLabel = rec.locationLabel
             )
         }
     }
@@ -531,6 +610,56 @@ object StatementImporter {
         }
         result.add(sb.toString().trim())
         return result
+    }
+
+    /**
+     * Exports ledger transactions as UTF-8 BOM CSV compatible with Excel and one-click re-import.
+     */
+    fun exportTransactionsToCsv(
+        transactions: List<TransactionEntity>,
+        categories: List<CategoryEntity>
+    ): String {
+        val catMap = categories.associateBy { it.id }
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+        val sb = StringBuilder()
+        sb.append("\uFEFF")
+        sb.appendLine("交易时间,收/支,金额(元),交易对方,商品说明,支付方式,分类,资金库,消费地点,备注,交易单号")
+        transactions.sortedByDescending { it.occurredAtMillis }.forEach { tx ->
+            val timeStr = synchronized(fmt) { fmt.format(java.util.Date(tx.occurredAtMillis)) }
+            val dirStr = when (tx.direction) {
+                TransactionDirection.EXPENSE -> "支出"
+                TransactionDirection.INCOME -> "收入"
+                TransactionDirection.REFUND -> "退款"
+                TransactionDirection.TRANSFER -> "转账"
+            }
+            val amountStr = MoneyFormatter.fenToYuanString(tx.amountFen)
+            val catName = catMap[tx.categoryId]?.name ?: tx.categoryId
+            val refId = tx.externalRefId.orEmpty().ifBlank { "ES_${tx.id}_${tx.occurredAtMillis}" }
+            val cols = listOf(
+                timeStr,
+                dirStr,
+                amountStr,
+                tx.merchant,
+                tx.rawDescription,
+                tx.channel.displayName,
+                catName,
+                tx.fundVault.displayName,
+                tx.locationLabel,
+                tx.note,
+                refId
+            ).joinToString(",") { escapeCsvCell(it) }
+            sb.appendLine(cols)
+        }
+        return sb.toString()
+    }
+
+    private fun escapeCsvCell(raw: String): String {
+        val clean = raw.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+        return if (clean.contains(',') || clean.contains('"')) {
+            "\"${clean.replace("\"", "\"\"")}\""
+        } else {
+            clean
+        }
     }
 }
 

@@ -21,6 +21,11 @@ enum class FundingSource(val displayName: String) {
     UNASSIGNED("未归属")
 }
 
+enum class FundVault(val displayName: String, val shortLabel: String) {
+    POCKET("零花库", "零花"),
+    SAVINGS("储蓄库", "储蓄")
+}
+
 enum class TransactionSourceType(val displayName: String) {
     WECHAT_BILL_IMPORT("微信账单导入"),
     ALIPAY_BILL_IMPORT("支付宝账单导入"),

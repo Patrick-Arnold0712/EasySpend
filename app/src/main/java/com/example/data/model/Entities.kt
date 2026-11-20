@@ -31,7 +31,9 @@ data class TransactionEntity(
     val confidenceScore: Float = 1f,
     val reviewStatus: ReviewStatus,
     val note: String = "",
-    val createdAtMillis: Long = System.currentTimeMillis()
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val fundVault: FundVault = FundVault.POCKET,
+    val locationLabel: String = ""
 )
 
 @Entity(tableName = "import_batches")
@@ -65,7 +67,9 @@ data class ImportCandidateEntity(
     val discrepancyType: DiscrepancyType,
     val matchedTransactionId: Long? = null,
     val discrepancyNote: String,
-    val resolutionStatus: CandidateResolution = CandidateResolution.PENDING
+    val resolutionStatus: CandidateResolution = CandidateResolution.PENDING,
+    val fundVault: FundVault = FundVault.POCKET,
+    val locationLabel: String = ""
 )
 
 @Entity(tableName = "budgets", primaryKeys = ["monthKey", "categoryId"])

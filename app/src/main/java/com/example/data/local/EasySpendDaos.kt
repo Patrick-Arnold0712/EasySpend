@@ -45,6 +45,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE monthKey = :monthKey ORDER BY occurredAtMillis DESC, id DESC")
     suspend fun getForMonth(monthKey: String): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions ORDER BY occurredAtMillis DESC, id DESC")
+    fun observeAll(): Flow<List<TransactionEntity>>
+
     @Query("SELECT * FROM transactions ORDER BY occurredAtMillis DESC")
     suspend fun getAll(): List<TransactionEntity>
 
@@ -60,6 +63,14 @@ interface TransactionDao {
     @Query("UPDATE transactions SET categoryId = :categoryId, classificationSource = :source WHERE id = :txId")
     suspend fun updateCategory(txId: Long, categoryId: String, source: ClassificationSource)
 
+    @Query("UPDATE transactions SET categoryId = :categoryId, fundVault = :fundVault, classificationSource = :source WHERE id = :txId")
+    suspend fun updateCategoryAndVault(
+        txId: Long,
+        categoryId: String,
+        fundVault: com.example.data.model.FundVault,
+        source: ClassificationSource
+    )
+
     @Query("UPDATE transactions SET categoryId = :fallbackId WHERE categoryId = :oldId")
     suspend fun reassignCategory(oldId: String, fallbackId: String)
 
@@ -74,6 +85,9 @@ interface ImportDao {
 
     @Query("SELECT * FROM import_candidates WHERE resolutionStatus = 'PENDING' ORDER BY occurredAtMillis DESC, id DESC")
     suspend fun getPendingCandidates(): List<ImportCandidateEntity>
+
+    @Query("SELECT * FROM import_candidates ORDER BY occurredAtMillis DESC, id DESC")
+    suspend fun getAllCandidates(): List<ImportCandidateEntity>
 
     @Query("SELECT * FROM import_candidates WHERE id = :id LIMIT 1")
     suspend fun getCandidateById(id: Long): ImportCandidateEntity?

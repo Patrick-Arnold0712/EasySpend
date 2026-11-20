@@ -3,6 +3,7 @@ package com.example.domain.finance
 import com.example.data.model.BudgetEntity
 import com.example.data.model.CategoryEntity
 import com.example.data.model.CategoryGroup
+import com.example.data.model.FundVault
 import com.example.data.model.FundingSource
 import com.example.data.model.SavingsGoalEntity
 import com.example.data.model.TransactionDirection
@@ -36,6 +37,24 @@ data class BudgetAdjustmentSuggestion(
     val reason: String
 )
 
+data class VaultBreakdown(
+    val vault: FundVault,
+    val incomeFen: Long = 0L,
+    val grossExpenseFen: Long = 0L,
+    val refundFen: Long = 0L,
+    val netExpenseFen: Long = 0L,
+    val netBalanceFen: Long = 0L,
+    val incomeCount: Int = 0,
+    val expenseCount: Int = 0
+)
+
+data class VaultPortfolioSummary(
+    val pocket: VaultBreakdown = VaultBreakdown(FundVault.POCKET),
+    val savings: VaultBreakdown = VaultBreakdown(FundVault.SAVINGS)
+) {
+    val totalNetBalanceFen: Long get() = pocket.netBalanceFen + savings.netBalanceFen
+}
+
 data class MonthlyFinancialSummary(
     val monthKey: String,
     val livingAllowanceIncomeFen: Long,
@@ -53,7 +72,8 @@ data class MonthlyFinancialSummary(
     val isSavingsTargetFeasible: Boolean,
     val savingsFeasibilityNote: String,
     val categoryStatuses: List<CategoryBudgetStatus>,
-    val suggestedAdjustments: List<BudgetAdjustmentSuggestion>
+    val suggestedAdjustments: List<BudgetAdjustmentSuggestion>,
+    val monthlyVaultSummary: VaultPortfolioSummary = VaultPortfolioSummary()
 )
 
 object BudgetAndForecastEngine {
@@ -261,7 +281,50 @@ object BudgetAndForecastEngine {
             isSavingsTargetFeasible = isFeasible,
             savingsFeasibilityNote = note,
             categoryStatuses = statuses,
-            suggestedAdjustments = suggestions
+            suggestedAdjustments = suggestions,
+            monthlyVaultSummary = evaluateVaultPortfolio(monthTxs)
+        )
+    }
+
+    fun evaluateVaultPortfolio(transactions: List<TransactionEntity>): VaultPortfolioSummary {
+        fun computeFor(vault: FundVault): VaultBreakdown {
+            var income = 0L
+            var grossExpense = 0L
+            var refund = 0L
+            var incomeCount = 0
+            var expenseCount = 0
+            transactions.forEach { tx ->
+                if (tx.fundVault != vault) return@forEach
+                when (tx.direction) {
+                    TransactionDirection.INCOME -> {
+                        income += tx.amountFen
+                        incomeCount++
+                    }
+                    TransactionDirection.EXPENSE -> {
+                        grossExpense += tx.amountFen
+                        expenseCount++
+                    }
+                    TransactionDirection.REFUND -> {
+                        refund += tx.amountFen
+                    }
+                    TransactionDirection.TRANSFER -> Unit
+                }
+            }
+            val netExpense = (grossExpense - refund).coerceAtLeast(0L)
+            return VaultBreakdown(
+                vault = vault,
+                incomeFen = income,
+                grossExpenseFen = grossExpense,
+                refundFen = refund,
+                netExpenseFen = netExpense,
+                netBalanceFen = income - netExpense,
+                incomeCount = incomeCount,
+                expenseCount = expenseCount
+            )
+        }
+        return VaultPortfolioSummary(
+            pocket = computeFor(FundVault.POCKET),
+            savings = computeFor(FundVault.SAVINGS)
         )
     }
 }

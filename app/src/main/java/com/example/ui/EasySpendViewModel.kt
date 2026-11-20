@@ -28,6 +28,7 @@ import com.example.data.model.CandidateResolution
 import com.example.data.model.CategoryEntity
 import com.example.data.model.CategoryGroup
 import com.example.data.model.ClassificationSource
+import com.example.data.model.FundVault
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportBatchEntity
 import com.example.data.model.ImportCandidateEntity
@@ -40,6 +41,7 @@ import com.example.data.repository.EasySpendRepository
 import com.example.domain.finance.MoneyFormatter
 import com.example.domain.finance.MonthlyFinancialSummary
 import com.example.domain.finance.XlsxStatementParser
+import com.example.service.LocationContextResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -87,12 +89,41 @@ private fun defaultWelcomeMessages(): List<AgentChatMessage> = listOf(
     )
 )
 
+private sealed interface LedgerUndoAction {
+    val label: String
+
+    data class DeletedTransaction(
+        val tx: TransactionEntity,
+        override val label: String
+    ) : LedgerUndoAction
+
+    data class UpdatedCategory(
+        val txId: Long,
+        val previousCategoryId: String,
+        val previousVault: FundVault,
+        val previousSource: ClassificationSource,
+        override val label: String
+    ) : LedgerUndoAction
+
+    data class ConfirmedCandidate(
+        val insertedTxId: Long,
+        val candidateId: Long,
+        override val label: String
+    ) : LedgerUndoAction
+
+    data class AddedManualTransaction(
+        val insertedTxId: Long,
+        override val label: String
+    ) : LedgerUndoAction
+}
+
 data class EasySpendUiState(
     val accountState: AccountState = AccountState(),
     val authErrorMessage: String? = null,
     val settings: UserSettings = UserSettings(),
     val categories: List<CategoryEntity> = emptyList(),
     val transactions: List<TransactionEntity> = emptyList(),
+    val allTransactions: List<TransactionEntity> = emptyList(),
     val pendingCandidates: List<ImportCandidateEntity> = emptyList(),
     val importBatches: List<ImportBatchEntity> = emptyList(),
     val merchantPreferences: List<MerchantPreferenceEntity> = emptyList(),
@@ -106,7 +137,9 @@ data class EasySpendUiState(
     val streamingAgentText: String = "",
     val agentMessages: List<AgentChatMessage> = defaultWelcomeMessages(),
     val apiTestFeedback: ApiTestFeedback = ApiTestFeedback(),
-    val bannerMessage: String? = null
+    val bannerMessage: String? = null,
+    val isReplayingOnboarding: Boolean = false,
+    val lastUndoLabel: String? = null
 )
 
 private data class AccountSession(
@@ -125,7 +158,9 @@ private data class TransientUiState(
     val streamingAgentText: String,
     val agentMessages: List<AgentChatMessage>,
     val apiTestFeedback: ApiTestFeedback,
-    val bannerMessage: String?
+    val bannerMessage: String?,
+    val isReplayingOnboarding: Boolean,
+    val lastUndoLabel: String?
 )
 
 class EasySpendViewModel(application: Application) : AndroidViewModel(application) {
@@ -145,8 +180,19 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
     private val _agentMessages = MutableStateFlow(defaultWelcomeMessages())
     private val _apiTestFeedback = MutableStateFlow(ApiTestFeedback())
     private val _bannerMessage = MutableStateFlow<String?>(null)
+    private val _isReplayingOnboarding = MutableStateFlow(false)
+    private val _lastUndoLabel = MutableStateFlow<String?>(null)
 
+    private val undoStack = ArrayDeque<LedgerUndoAction>()
     private val conversationHistory = mutableListOf<ConversationTurn>()
+
+    private fun pushUndoAction(action: LedgerUndoAction) {
+        if (undoStack.size >= 20) {
+            undoStack.removeFirst()
+        }
+        undoStack.addLast(action)
+        _lastUndoLabel.value = action.label
+    }
 
     private fun getOrCreateSession(account: LocalAccount): AccountSession {
         val current = activeSession
@@ -175,7 +221,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _streamingAgentText,
         _agentMessages,
         _apiTestFeedback,
-        _bannerMessage
+        _bannerMessage,
+        _isReplayingOnboarding,
+        _lastUndoLabel
     ) { arr ->
         @Suppress("UNCHECKED_CAST")
         TransientUiState(
@@ -187,7 +235,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             streamingAgentText = arr[5] as String,
             agentMessages = arr[6] as List<AgentChatMessage>,
             apiTestFeedback = arr[7] as ApiTestFeedback,
-            bannerMessage = arr[8] as String?
+            bannerMessage = arr[8] as String?,
+            isReplayingOnboarding = arr[9] as Boolean,
+            lastUndoLabel = arr[10] as String?
         )
     }
 
@@ -219,6 +269,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                 session.settingsStore.settingsFlow,
                 repo.categoriesFlow,
                 monthDataFlow,
+                repo.allTransactionsFlow,
                 repo.pendingCandidatesFlow,
                 repo.importBatchesFlow,
                 repo.merchantPreferencesFlow,
@@ -231,14 +282,16 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                 @Suppress("UNCHECKED_CAST")
                 val monthTriple = values[2] as Triple<List<TransactionEntity>, MonthlyFinancialSummary, SavingsGoalEntity?>
                 @Suppress("UNCHECKED_CAST")
-                val pendingCandidates = values[3] as List<ImportCandidateEntity>
+                val allTransactions = values[3] as List<TransactionEntity>
                 @Suppress("UNCHECKED_CAST")
-                val batches = values[4] as List<ImportBatchEntity>
+                val pendingCandidates = values[4] as List<ImportCandidateEntity>
                 @Suppress("UNCHECKED_CAST")
-                val prefs = values[5] as List<MerchantPreferenceEntity>
+                val batches = values[5] as List<ImportBatchEntity>
                 @Suppress("UNCHECKED_CAST")
-                val logs = values[6] as List<AgentToolLogEntity>
-                val tr = values[7] as TransientUiState
+                val prefs = values[6] as List<MerchantPreferenceEntity>
+                @Suppress("UNCHECKED_CAST")
+                val logs = values[7] as List<AgentToolLogEntity>
+                val tr = values[8] as TransientUiState
 
                 EasySpendUiState(
                     accountState = accState,
@@ -246,6 +299,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                     settings = settings,
                     categories = categories,
                     transactions = monthTriple.first,
+                    allTransactions = allTransactions,
                     summary = monthTriple.second,
                     savingsGoal = monthTriple.third,
                     pendingCandidates = pendingCandidates,
@@ -259,7 +313,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                     streamingAgentText = tr.streamingAgentText,
                     agentMessages = tr.agentMessages,
                     apiTestFeedback = tr.apiTestFeedback,
-                    bannerMessage = tr.bannerMessage
+                    bannerMessage = tr.bannerMessage,
+                    isReplayingOnboarding = tr.isReplayingOnboarding,
+                    lastUndoLabel = tr.lastUndoLabel
                 )
             }
         }
@@ -271,6 +327,8 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun resetSessionTransientState() {
         conversationHistory.clear()
+        undoStack.clear()
+        _lastUndoLabel.value = null
         _aiInsightState.value = AiInsightState.Idle
         _isAiClassifying.value = false
         _isAgentResponding.value = false
@@ -279,6 +337,7 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _agentMessages.value = defaultWelcomeMessages()
         _apiTestFeedback.value = ApiTestFeedback()
         _authErrorMessage.value = null
+        _isReplayingOnboarding.value = false
     }
 
     // --- Account Authentication & Management ---
@@ -410,6 +469,10 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         _bannerMessage.value = null
     }
 
+    fun showBanner(message: String) {
+        _bannerMessage.value = message
+    }
+
     fun loadDemoIntoReviewQueue() {
         val session = activeSession ?: return
         viewModelScope.launch {
@@ -482,6 +545,63 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun exportLedgerToUri(context: Context, uri: Uri) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            try {
+                val csv = session.repository.exportAllTransactionsCsv()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(csv.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    } ?: throw IllegalStateException("无法写入目标文件")
+                }
+                val totalCount = uiState.value.allTransactions.size
+                _bannerMessage.value = "已一键导出全部 $totalCount 条收支记录（CSV 格式）。"
+            } catch (e: Exception) {
+                Log.e(TAG, "Ledger export failed", e)
+                _bannerMessage.value = "导出失败：${e.localizedMessage ?: "文件写入异常"}"
+            }
+        }
+    }
+
+    fun importAndAutoClassifyFromUri(context: Context, uri: Uri) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("无法读取所选文件")
+                }
+                val isXlsx = XlsxStatementParser.isXlsxBytes(bytes)
+                val result = if (isXlsx) {
+                    session.repository.importAndAutoClassifyXlsx(
+                        xlsxBytes = bytes,
+                        sourceLabel = "一键导入自动分类(Excel)"
+                    )
+                } else {
+                    val content = withContext(Dispatchers.Default) { decodeStatementBytes(bytes) }
+                    session.repository.importAndAutoClassifyCsv(
+                        csvContent = content,
+                        sourceLabel = "一键导入自动分类(CSV)"
+                    )
+                }
+                result.onSuccess { summary ->
+                    _bannerMessage.value = if (summary.duplicateSkippedCount > 0) {
+                        "已一键导入并自动分类 ${summary.importedCount} 笔记录（已自动跳过 ${summary.duplicateSkippedCount} 笔重复）。"
+                    } else {
+                        "已一键导入并自动分类 ${summary.importedCount} 笔记录。"
+                    }
+                }.onFailure { err ->
+                    _bannerMessage.value = err.localizedMessage ?: "导入失败"
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Auto-classify import failed", e)
+                _bannerMessage.value = "一键导入失败：${e.localizedMessage ?: "文件读取异常"}"
+            }
+        }
+    }
+
     fun simulatePaymentNotification(isWeChat: Boolean) {
         val session = activeSession ?: return
         viewModelScope.launch {
@@ -498,9 +618,16 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
                     "你通过支付宝向 美团 付款1.80元（来自通知监听POC）"
                 )
             }
-            val res = session.repository.stageSimulatedNotification(pkg, title, text)
+            val locLabel = if (uiState.value.settings.locationClassificationEnabled) {
+                runCatching { LocationContextResolver.captureCurrentLocation(appContext)?.label.orEmpty() }
+                    .getOrDefault("")
+            } else {
+                ""
+            }
+            val res = session.repository.stageSimulatedNotification(pkg, title, text, locationLabel = locLabel)
             res.onSuccess {
-                _bannerMessage.value = "已捕获 ${it.channel.displayName} 通知「${it.merchant} ${MoneyFormatter.formatFen(it.amountFen)}」，已加入待核对队列。"
+                val locHint = if (it.locationLabel.isNotBlank()) "（📍 ${it.locationLabel}）" else ""
+                _bannerMessage.value = "已捕获 ${it.channel.displayName} 通知「${it.merchant} ${MoneyFormatter.formatFen(it.amountFen)}」$locHint，已加入待核对队列。"
             }.onFailure {
                 _bannerMessage.value = it.localizedMessage ?: "通知解析失败"
             }
@@ -512,17 +639,29 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         categoryId: String,
         fundingSource: FundingSource,
         rememberMerchant: Boolean,
-        note: String
+        note: String,
+        fundVault: FundVault? = null
     ) {
         val session = activeSession ?: return
         viewModelScope.launch {
-            session.repository.confirmCandidateToLedger(
+            val candidateMerchant = uiState.value.pendingCandidates.firstOrNull { it.id == candidateId }?.merchant ?: "交易"
+            val insertedTxId = session.repository.confirmCandidateToLedger(
                 candidateId = candidateId,
                 selectedCategoryId = categoryId,
                 selectedFundingSource = fundingSource,
                 rememberMerchantPreference = rememberMerchant,
-                note = note
+                note = note,
+                selectedFundVault = fundVault
             )
+            if (insertedTxId != null) {
+                pushUndoAction(
+                    LedgerUndoAction.ConfirmedCandidate(
+                        insertedTxId = insertedTxId,
+                        candidateId = candidateId,
+                        label = "撤回入账「$candidateMerchant」"
+                    )
+                )
+            }
             _bannerMessage.value = "已核对确认并记入正式账本。"
         }
     }
@@ -598,7 +737,9 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         fundingSource: FundingSource,
         categoryId: String,
         merchant: String,
-        note: String
+        note: String,
+        fundVault: FundVault = FundVault.POCKET,
+        locationLabel: String = ""
     ) {
         val session = activeSession ?: return
         val fen = MoneyFormatter.parseYuanToFen(amountYuanStr)
@@ -607,32 +748,117 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         viewModelScope.launch {
-            session.repository.addManualTransaction(
+            val resolvedLocation = locationLabel.trim().ifBlank {
+                if (uiState.value.settings.locationClassificationEnabled) {
+                    runCatching { LocationContextResolver.captureCurrentLocation(appContext)?.label.orEmpty() }
+                        .getOrDefault("")
+                } else {
+                    ""
+                }
+            }
+            val insertedId = session.repository.addManualTransaction(
                 amountFen = fen,
                 direction = direction,
                 channel = channel,
                 fundingSource = fundingSource,
                 categoryId = categoryId,
                 merchant = merchant,
-                note = note
+                note = note,
+                fundVault = fundVault,
+                locationLabel = resolvedLocation
+            )
+            val title = merchant.ifBlank { "手动记账" }
+            pushUndoAction(
+                LedgerUndoAction.AddedManualTransaction(
+                    insertedTxId = insertedId,
+                    label = "撤回新增「$title」"
+                )
             )
             _bannerMessage.value = "已手动记入 ${MoneyFormatter.formatFen(fen)}。"
         }
     }
 
     fun updateTransactionCategory(txId: Long, categoryId: String, rememberMerchant: Boolean) {
+        val existingVault = uiState.value.allTransactions.firstOrNull { it.id == txId }?.fundVault ?: FundVault.POCKET
+        updateTransactionCategoryAndVault(txId, categoryId, existingVault, rememberMerchant)
+    }
+
+    fun updateTransactionCategoryAndVault(
+        txId: Long,
+        categoryId: String,
+        fundVault: FundVault,
+        rememberMerchant: Boolean
+    ) {
         val session = activeSession ?: return
         viewModelScope.launch {
-            session.repository.updateTransactionCategory(txId, categoryId, rememberMerchant)
-            _bannerMessage.value = "交易分类已更新并记录。"
+            val previous = session.repository.updateTransactionCategoryAndVault(
+                txId = txId,
+                categoryId = categoryId,
+                fundVault = fundVault,
+                rememberMerchant = rememberMerchant
+            )
+            if (previous != null && (previous.categoryId != categoryId || previous.fundVault != fundVault)) {
+                pushUndoAction(
+                    LedgerUndoAction.UpdatedCategory(
+                        txId = txId,
+                        previousCategoryId = previous.categoryId,
+                        previousVault = previous.fundVault,
+                        previousSource = previous.classificationSource,
+                        label = "撤回修改「${previous.merchant}」"
+                    )
+                )
+            }
+            _bannerMessage.value = "交易分类已更新并学习记忆。"
         }
     }
 
     fun deleteTransaction(txId: Long) {
         val session = activeSession ?: return
         viewModelScope.launch {
-            session.repository.deleteTransaction(txId)
-            _bannerMessage.value = "已删除该条交易记录。"
+            val deleted = session.repository.deleteTransaction(txId)
+            if (deleted != null) {
+                pushUndoAction(
+                    LedgerUndoAction.DeletedTransaction(
+                        tx = deleted,
+                        label = "撤回删除「${deleted.merchant}」"
+                    )
+                )
+            }
+            _bannerMessage.value = "已删除该条交易记录（可点撤销恢复）。"
+        }
+    }
+
+    fun undoLastLedgerAction() {
+        val session = activeSession ?: return
+        val action = undoStack.removeLastOrNull() ?: return
+        _lastUndoLabel.value = undoStack.lastOrNull()?.label
+        viewModelScope.launch {
+            when (action) {
+                is LedgerUndoAction.DeletedTransaction -> {
+                    session.repository.restoreDeletedTransaction(action.tx)
+                    _bannerMessage.value = "已恢复记录「${action.tx.merchant} ${MoneyFormatter.formatFen(action.tx.amountFen)}」。"
+                }
+                is LedgerUndoAction.UpdatedCategory -> {
+                    session.repository.revertTransactionCategoryAndVault(
+                        txId = action.txId,
+                        previousCategoryId = action.previousCategoryId,
+                        previousVault = action.previousVault,
+                        previousSource = action.previousSource
+                    )
+                    _bannerMessage.value = "已撤销修改，恢复原分类与资金库。"
+                }
+                is LedgerUndoAction.ConfirmedCandidate -> {
+                    session.repository.revertConfirmedCandidate(
+                        txId = action.insertedTxId,
+                        candidateId = action.candidateId
+                    )
+                    _bannerMessage.value = "已撤回入账，记录已放回「待核对」队列。"
+                }
+                is LedgerUndoAction.AddedManualTransaction -> {
+                    session.repository.deleteTransaction(action.insertedTxId)
+                    _bannerMessage.value = "已撤回刚才新增的记账记录。"
+                }
+            }
         }
     }
 
@@ -866,6 +1092,77 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun openOnboardingReplay() {
+        _isReplayingOnboarding.value = true
+    }
+
+    fun skipOnboarding() {
+        val session = activeSession
+        _isReplayingOnboarding.value = false
+        if (session != null) {
+            viewModelScope.launch {
+                session.settingsStore.setOnboardingCompleted(true)
+            }
+        }
+    }
+
+    fun completeOnboarding(
+        monthlyAllowanceYuan: String,
+        savingsTargetYuan: String,
+        expectedPartTimeYuan: String,
+        recordAllowanceIncomeNow: Boolean,
+        loadDemoData: Boolean = false
+    ) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            val month = uiState.value.settings.activeMonthKey
+            session.repository.ensureInitialized(month)
+
+            val allowanceFen = MoneyFormatter.parseYuanToFen(monthlyAllowanceYuan)?.coerceAtLeast(0L) ?: 0L
+            val targetFen = MoneyFormatter.parseYuanToFen(savingsTargetYuan)?.coerceAtLeast(0L) ?: 0L
+            val partTimeFen = MoneyFormatter.parseYuanToFen(expectedPartTimeYuan)?.coerceAtLeast(0L) ?: 0L
+
+            if (allowanceFen > 0L || targetFen > 0L || partTimeFen > 0L) {
+                session.repository.updateSavingsGoal(
+                    monthKey = month,
+                    targetFen = targetFen,
+                    livingAllowanceExpectedFen = allowanceFen,
+                    partTimeExpectedFen = partTimeFen
+                )
+            }
+
+            if (loadDemoData) {
+                session.repository.loadCompetitionDemoCommittedBaseline(month)
+            } else if (recordAllowanceIncomeNow && allowanceFen > 0L) {
+                val existingTxs = uiState.value.transactions
+                val alreadyRecorded = existingTxs.any {
+                    it.direction == TransactionDirection.INCOME &&
+                        it.categoryId == "allowance" &&
+                        it.amountFen == allowanceFen
+                }
+                if (!alreadyRecorded) {
+                    session.repository.addManualTransaction(
+                        amountFen = allowanceFen,
+                        direction = TransactionDirection.INCOME,
+                        channel = PaymentChannel.BANK_CARD,
+                        fundingSource = FundingSource.LIVING_ALLOWANCE,
+                        categoryId = "allowance",
+                        merchant = "每月生活费",
+                        note = "新手引导初始化"
+                    )
+                }
+            }
+
+            session.settingsStore.setOnboardingCompleted(true)
+            _isReplayingOnboarding.value = false
+            _bannerMessage.value = if (loadDemoData) {
+                "新手引导已完成，已为你载入体验账单与存钱目标！"
+            } else {
+                "新手引导已完成，本月目标与设置已生效！"
+            }
+        }
+    }
+
     fun saveApiConfig(
         provider: ApiProviderType,
         baseUrl: String,
@@ -906,6 +1203,43 @@ class EasySpendViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearApiTestFeedback() {
         _apiTestFeedback.value = ApiTestFeedback()
+    }
+
+    fun setBackgroundKeepAliveEnabled(enabled: Boolean) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            session.settingsStore.setBackgroundKeepAliveEnabled(enabled)
+            com.example.service.NotificationKeepAliveService.sync(getApplication(), enabled)
+            _bannerMessage.value = if (enabled) {
+                "已开启后台防掉线守护，息屏或切后台时将持续保护自动抓账。"
+            } else {
+                "已关闭前台守护通知（仍保留系统定时巡检）。"
+            }
+        }
+    }
+
+    fun setDetailedModeEnabled(enabled: Boolean) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            session.settingsStore.setDetailedModeEnabled(enabled)
+            _bannerMessage.value = if (enabled) {
+                "已开启「详细版」，首页与记账页将显示零花库 / 储蓄库明细。"
+            } else {
+                "已切换为「简洁版」，已隐藏资金库面板（数据完整保留）。"
+            }
+        }
+    }
+
+    fun setLocationClassificationEnabled(enabled: Boolean) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            session.settingsStore.setLocationClassificationEnabled(enabled)
+            _bannerMessage.value = if (enabled) {
+                "已开启同步定位辅助分类，读账时将结合消费地点提升分类准度。"
+            } else {
+                "已关闭读取账单时的定位辅助分类。"
+            }
+        }
     }
 
     private fun decodeStatementBytes(bytes: ByteArray): String {

@@ -16,6 +16,7 @@ import com.example.data.model.CategoryEntity
 import com.example.data.model.CategoryGroup
 import com.example.data.model.ClassificationSource
 import com.example.data.model.DiscrepancyType
+import com.example.data.model.FundVault
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportBatchEntity
 import com.example.data.model.ImportCandidateEntity
@@ -36,6 +37,10 @@ class RoomTypeConverters {
 
     @TypeConverter fun fromFundingSource(v: FundingSource): String = v.name
     @TypeConverter fun toFundingSource(v: String): FundingSource = FundingSource.valueOf(v)
+
+    @TypeConverter fun fromFundVault(v: FundVault): String = v.name
+    @TypeConverter fun toFundVault(v: String): FundVault =
+        runCatching { FundVault.valueOf(v) }.getOrDefault(FundVault.POCKET)
 
     @TypeConverter fun fromSourceType(v: TransactionSourceType): String = v.name
     @TypeConverter fun toSourceType(v: String): TransactionSourceType = TransactionSourceType.valueOf(v)
@@ -67,7 +72,7 @@ class RoomTypeConverters {
         MerchantPreferenceEntity::class,
         AgentToolLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(RoomTypeConverters::class)
@@ -92,6 +97,15 @@ abstract class EasySpendDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN fundVault TEXT NOT NULL DEFAULT 'POCKET'")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN locationLabel TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE import_candidates ADD COLUMN fundVault TEXT NOT NULL DEFAULT 'POCKET'")
+                db.execSQL("ALTER TABLE import_candidates ADD COLUMN locationLabel TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun dbNameForAccount(accountId: String): String {
             val safeId = accountId.replace(Regex("[^a-zA-Z0-9_-]"), "")
             return "easyspend_acct_${safeId.ifBlank { "default" }}.db"
@@ -104,7 +118,7 @@ abstract class EasySpendDatabase : RoomDatabase() {
                     EasySpendDatabase::class.java,
                     dbName
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instances[dbName] = it }
             }

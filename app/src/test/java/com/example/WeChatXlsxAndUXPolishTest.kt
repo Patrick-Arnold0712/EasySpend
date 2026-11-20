@@ -135,43 +135,24 @@ class WeChatXlsxAndUXPolishTest {
     }
 
     @Test
-    fun `UserSettingsDataStore persists hideBeginnerGuide and DashboardScreen hides card once dismissed`() = runTest {
+    fun `UserSettingsDataStore persists onboardingCompleted and hideBeginnerGuide`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val store = UserSettingsDataStore(context)
+        val store = UserSettingsDataStore(context, accountId = "test_onboarding_${System.nanoTime()}")
 
         assertFalse(store.settingsFlow.first().hideBeginnerGuide)
+        assertFalse(store.settingsFlow.first().onboardingCompleted)
         store.setHideBeginnerGuide(true)
+        store.setOnboardingCompleted(true)
         assertTrue(store.settingsFlow.first().hideBeginnerGuide)
+        assertTrue(store.settingsFlow.first().onboardingCompleted)
+    }
 
-        var dismissedClicked = false
+    @Test
+    fun `DashboardScreen stays uncluttered without inline beginner guide card`() {
         composeTestRule.setContent {
             EasySpendTheme(darkTheme = false) {
                 DashboardScreen(
                     state = EasySpendUiState(settings = UserSettings(hideBeginnerGuide = false)),
-                    onLoadDemoQueue = {},
-                    onLoadDemoBaseline = {},
-                    onAdd300Essential = {},
-                    onNavigateToImportQueue = {},
-                    onNavigateToBudget = {},
-                    onNavigateToAgentWithPrompt = {},
-                    onDismissBeginnerGuide = { dismissedClicked = true }
-                )
-            }
-        }
-
-        composeTestRule.onNodeWithTag("dashboard_lazy_list")
-            .performScrollToNode(hasTestTag("beginner_guide_card"))
-        composeTestRule.onNodeWithTag("beginner_guide_card").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("dismiss_beginner_guide_button").performClick()
-        assertTrue(dismissedClicked)
-    }
-
-    @Test
-    fun `DashboardScreen does not render beginner guide card when hideBeginnerGuide is true`() {
-        composeTestRule.setContent {
-            EasySpendTheme(darkTheme = false) {
-                DashboardScreen(
-                    state = EasySpendUiState(settings = UserSettings(hideBeginnerGuide = true)),
                     onLoadDemoQueue = {},
                     onLoadDemoBaseline = {},
                     onAdd300Essential = {},

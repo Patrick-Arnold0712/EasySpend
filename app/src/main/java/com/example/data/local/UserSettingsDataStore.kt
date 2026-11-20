@@ -57,8 +57,12 @@ data class UserSettings(
     val dailyReviewMinute: Int = 30,
     val aiCloudAnalysisEnabled: Boolean = true,
     val notificationCaptureEnabled: Boolean = true,
+    val backgroundKeepAliveEnabled: Boolean = true,
+    val locationClassificationEnabled: Boolean = true,
+    val detailedModeEnabled: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val hideBeginnerGuide: Boolean = false,
+    val onboardingCompleted: Boolean = false,
     val apiProvider: ApiProviderType = ApiProviderType.DEEPSEEK,
     val apiBaseUrl: String = ApiProviderType.DEEPSEEK.defaultBaseUrl,
     val apiKey: String = "",
@@ -81,8 +85,12 @@ class UserSettingsDataStore(
     private val reviewMinuteKey = intPreferencesKey(prefix("review_minute"))
     private val aiCloudEnabledKey = booleanPreferencesKey(prefix("ai_cloud_enabled"))
     private val notificationCaptureEnabledKey = booleanPreferencesKey(prefix("notification_capture_enabled"))
+    private val backgroundKeepAliveEnabledKey = booleanPreferencesKey(prefix("background_keep_alive_enabled"))
+    private val locationClassificationEnabledKey = booleanPreferencesKey(prefix("location_classification_enabled"))
+    private val detailedModeEnabledKey = booleanPreferencesKey(prefix("detailed_mode_enabled"))
     private val themeModeKey = stringPreferencesKey(prefix("theme_mode"))
     private val hideBeginnerGuideKey = booleanPreferencesKey(prefix("hide_beginner_guide"))
+    private val onboardingCompletedKey = booleanPreferencesKey(prefix("onboarding_completed"))
     private val apiProviderKey = stringPreferencesKey(prefix("api_provider"))
     private val apiBaseUrlKey = stringPreferencesKey(prefix("api_base_url"))
     private val apiKeyPref = stringPreferencesKey(prefix("api_key"))
@@ -103,8 +111,12 @@ class UserSettingsDataStore(
             dailyReviewMinute = prefs[reviewMinuteKey] ?: 30,
             aiCloudAnalysisEnabled = prefs[aiCloudEnabledKey] ?: true,
             notificationCaptureEnabled = prefs[notificationCaptureEnabledKey] ?: true,
+            backgroundKeepAliveEnabled = prefs[backgroundKeepAliveEnabledKey] ?: true,
+            locationClassificationEnabled = prefs[locationClassificationEnabledKey] ?: true,
+            detailedModeEnabled = prefs[detailedModeEnabledKey] ?: true,
             themeMode = parsedTheme,
             hideBeginnerGuide = prefs[hideBeginnerGuideKey] ?: false,
+            onboardingCompleted = prefs[onboardingCompletedKey] ?: false,
             apiProvider = parsedProvider,
             apiBaseUrl = prefs[apiBaseUrlKey]?.ifBlank { parsedProvider.defaultBaseUrl } ?: parsedProvider.defaultBaseUrl,
             apiKey = prefs[apiKeyPref] ?: "",
@@ -131,6 +143,24 @@ class UserSettingsDataStore(
         }
     }
 
+    suspend fun setBackgroundKeepAliveEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[backgroundKeepAliveEnabledKey] = enabled
+        }
+    }
+
+    suspend fun setLocationClassificationEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[locationClassificationEnabledKey] = enabled
+        }
+    }
+
+    suspend fun setDetailedModeEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[detailedModeEnabledKey] = enabled
+        }
+    }
+
     suspend fun setActiveMonth(monthKey: String) {
         context.settingsDataStore.edit { prefs ->
             prefs[activeMonthKey] = monthKey
@@ -146,6 +176,12 @@ class UserSettingsDataStore(
     suspend fun setHideBeginnerGuide(hidden: Boolean) {
         context.settingsDataStore.edit { prefs ->
             prefs[hideBeginnerGuideKey] = hidden
+        }
+    }
+
+    suspend fun setOnboardingCompleted(completed: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[onboardingCompletedKey] = completed
         }
     }
 

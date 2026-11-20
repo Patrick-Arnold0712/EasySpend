@@ -8,6 +8,7 @@ import com.example.data.model.CategoryEntity
 import com.example.data.model.CategoryGroup
 import com.example.data.model.ClassificationSource
 import com.example.data.model.DiscrepancyType
+import com.example.data.model.FundVault
 import com.example.data.model.FundingSource
 import com.example.data.model.ImportBatchEntity
 import com.example.data.model.ImportCandidateEntity
@@ -31,6 +32,18 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.UUID
 
+data class AutoImportSummary(
+    val totalParsed: Int,
+    val importedCount: Int,
+    val duplicateSkippedCount: Int
+)
+
+sealed interface NotificationStageOutcome {
+    data class Staged(val candidate: ImportCandidateEntity) : NotificationStageOutcome
+    data object AlreadyRecorded : NotificationStageOutcome
+    data class Unparseable(val reason: String) : NotificationStageOutcome
+}
+
 class EasySpendRepository(private val db: EasySpendDatabase) {
 
     private val categoryDao = db.categoryDao()
@@ -42,6 +55,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
     private val toolLogDao = db.toolLogDao()
 
     val categoriesFlow: Flow<List<CategoryEntity>> = categoryDao.observeAll()
+    val allTransactionsFlow: Flow<List<TransactionEntity>> = txDao.observeAll()
     val pendingCandidatesFlow: Flow<List<ImportCandidateEntity>> = importDao.observePendingCandidates()
     val importBatchesFlow: Flow<List<ImportBatchEntity>> = importDao.observeBatches()
     val merchantPreferencesFlow: Flow<List<MerchantPreferenceEntity>> = merchantPrefDao.observeAll()
@@ -119,7 +133,12 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                     direction = rec.direction,
                     preferences = prefs,
                     amountFen = rec.amountFen,
-                    customCategories = allCategories
+                    customCategories = allCategories,
+                    occurredAtMillis = rec.occurredAtMillis,
+                    channel = rec.channel,
+                    note = rec.note,
+                    historicalTransactions = existing,
+                    locationLabel = rec.locationLabel
                 )
                 TransactionEntity(
                     externalRefId = rec.externalRefId,
@@ -129,6 +148,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                     direction = rec.direction,
                     channel = rec.channel,
                     fundingSource = rec.fundingSource,
+                    fundVault = rec.fundVault,
                     sourceType = rec.sourceType,
                     merchant = rec.merchant,
                     rawDescription = rec.rawDescription,
@@ -136,7 +156,8 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                     classificationSource = cls.source,
                     confidenceScore = cls.confidence,
                     reviewStatus = ReviewStatus.USER_CONFIRMED,
-                    note = "演示基线账单"
+                    note = "演示基线账单",
+                    locationLabel = rec.locationLabel
                 )
             }
             txDao.insertAll(committed)
@@ -171,6 +192,119 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
             return Result.failure(IllegalArgumentException("未在 Excel (.xlsx) 账单中识别到有效的交易记录"))
         }
         return stageParsedRecords(records, sourceLabel, preferredChannel)
+    }
+
+    /**
+     * Exports all transactions of the current account into a UTF-8 BOM CSV string.
+     */
+    suspend fun exportAllTransactionsCsv(): String {
+        val allTxs = txDao.getAll()
+        val categories = categoryDao.getAll().ifEmpty { ClassificationEngine.defaultCategories }
+        return StatementImporter.exportTransactionsToCsv(allTxs, categories)
+    }
+
+    /**
+     * One-click import & automatic smart classification straight into the formal ledger.
+     * Supports EasySpend exported CSV, WeChat CSV/XLSX, and Alipay CSV while skipping duplicates.
+     */
+    suspend fun importAndAutoClassifyCsv(
+        csvContent: String,
+        sourceLabel: String,
+        preferredChannel: PaymentChannel? = null
+    ): Result<AutoImportSummary> {
+        val records = StatementImporter.parseCsvStatement(csvContent, preferredChannel)
+        if (records.isEmpty()) {
+            return Result.failure(IllegalArgumentException("未在文件中识别到有效的收支记录"))
+        }
+        return commitAutoClassifiedRecords(records, sourceLabel, preferredChannel)
+    }
+
+    suspend fun importAndAutoClassifyXlsx(
+        xlsxBytes: ByteArray,
+        sourceLabel: String,
+        preferredChannel: PaymentChannel? = null
+    ): Result<AutoImportSummary> {
+        val records = StatementImporter.parseXlsxStatement(xlsxBytes, preferredChannel)
+        if (records.isEmpty()) {
+            return Result.failure(IllegalArgumentException("未在 Excel (.xlsx) 文件中识别到有效的收支记录"))
+        }
+        return commitAutoClassifiedRecords(records, sourceLabel, preferredChannel)
+    }
+
+    private suspend fun commitAutoClassifiedRecords(
+        records: List<ParsedRawRecord>,
+        sourceLabel: String,
+        preferredChannel: PaymentChannel?
+    ): Result<AutoImportSummary> {
+        val months = records.map { MoneyFormatter.monthKeyFromMillis(it.occurredAtMillis) }.distinct()
+        months.forEach { ensureInitialized(it) }
+
+        val existingTxs = txDao.getAll()
+        val prefs = merchantPrefDao.getAll()
+        val allCategories = categoryDao.getAll().ifEmpty { ClassificationEngine.defaultCategories }
+
+        val candidates = StatementImporter.buildStagingCandidates(
+            batchId = 0L,
+            records = records,
+            existingTransactions = existingTxs,
+            preferences = prefs,
+            existingPendingCandidates = emptyList(),
+            customCategories = allCategories
+        )
+
+        var importedCount = 0
+        var duplicateCount = 0
+        val toInsert = mutableListOf<TransactionEntity>()
+
+        candidates.forEachIndexed { idx, candidate ->
+            val rec = records[idx]
+            if (candidate.discrepancyType == DiscrepancyType.POTENTIAL_DUPLICATE) {
+                duplicateCount++
+            } else {
+                toInsert.add(
+                    TransactionEntity(
+                        externalRefId = candidate.externalRefId,
+                        occurredAtMillis = candidate.occurredAtMillis,
+                        monthKey = candidate.monthKey,
+                        amountFen = candidate.amountFen,
+                        direction = candidate.direction,
+                        channel = candidate.channel,
+                        fundingSource = candidate.fundingSource,
+                        fundVault = candidate.fundVault,
+                        sourceType = candidate.sourceType,
+                        merchant = candidate.merchant,
+                        rawDescription = candidate.rawDescription,
+                        categoryId = candidate.suggestedCategoryId,
+                        classificationSource = candidate.classificationSource,
+                        confidenceScore = candidate.confidenceScore,
+                        reviewStatus = ReviewStatus.AUTO_RULE_CLEAN,
+                        note = rec.note.ifBlank { candidate.rawDescription },
+                        locationLabel = candidate.locationLabel
+                    )
+                )
+                importedCount++
+            }
+        }
+
+        if (toInsert.isNotEmpty()) {
+            txDao.insertAll(toInsert)
+        }
+        importDao.insertBatch(
+            ImportBatchEntity(
+                channel = preferredChannel ?: records.first().channel,
+                sourceLabel = sourceLabel,
+                totalCount = records.size,
+                cleanCount = importedCount,
+                discrepancyCount = duplicateCount
+            )
+        )
+        return Result.success(
+            AutoImportSummary(
+                totalParsed = records.size,
+                importedCount = importedCount,
+                duplicateSkippedCount = duplicateCount
+            )
+        )
     }
 
     private suspend fun stageParsedRecords(
@@ -218,23 +352,64 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         return Result.success(finalBatch)
     }
 
-    suspend fun stagePaymentNotification(
+    suspend fun stagePaymentNotificationDetailed(
         packageName: String,
         title: String,
         text: String,
-        occurredAtMillis: Long = System.currentTimeMillis()
-    ): Result<ImportCandidateEntity> {
-        val rec = StatementImporter.parsePaymentNotification(packageName, title, text, occurredAtMillis)
-            ?: return Result.failure(IllegalArgumentException("未能从通知中解析出有效的支付金额或渠道"))
+        occurredAtMillis: Long = System.currentTimeMillis(),
+        skipIfAlreadyRecorded: Boolean = false,
+        sourceLabel: String = "支付通知实时捕获",
+        locationLabel: String = ""
+    ): NotificationStageOutcome {
+        val rec = StatementImporter.parsePaymentNotification(
+            packageName = packageName,
+            title = title,
+            text = text,
+            nowMillis = occurredAtMillis,
+            locationLabel = locationLabel
+        )
+            ?: return NotificationStageOutcome.Unparseable("未能从通知中解析出有效的支付金额或渠道")
 
         ensureInitialized(MoneyFormatter.monthKeyFromMillis(rec.occurredAtMillis))
+
+        val existingTransactions = txDao.getAll()
+        val allCandidates = importDao.getAllCandidates()
+        val existingPendingCandidates = allCandidates.filter { it.resolutionStatus == CandidateResolution.PENDING }
+
+        if (skipIfAlreadyRecorded) {
+            val normMerchant = normalizeNotificationMatchText(rec.merchant)
+            val normDesc = normalizeNotificationMatchText(rec.rawDescription)
+            val matchedTx = existingTransactions.any { tx ->
+                tx.channel == rec.channel &&
+                    tx.amountFen == rec.amountFen &&
+                    tx.direction == rec.direction &&
+                    kotlin.math.abs(tx.occurredAtMillis - rec.occurredAtMillis) <= 90_000L &&
+                    (
+                        normalizeNotificationMatchText(tx.merchant) == normMerchant ||
+                            normalizeNotificationMatchText(tx.rawDescription) == normDesc
+                        )
+            }
+            val matchedCandidate = allCandidates.any { cand ->
+                cand.channel == rec.channel &&
+                    cand.amountFen == rec.amountFen &&
+                    cand.direction == rec.direction &&
+                    kotlin.math.abs(cand.occurredAtMillis - rec.occurredAtMillis) <= 90_000L &&
+                    (
+                        normalizeNotificationMatchText(cand.merchant) == normMerchant ||
+                            normalizeNotificationMatchText(cand.rawDescription) == normDesc
+                        )
+            }
+            if (matchedTx || matchedCandidate) {
+                return NotificationStageOutcome.AlreadyRecorded
+            }
+        }
 
         val candidates = StatementImporter.buildStagingCandidates(
             batchId = 0L,
             records = listOf(rec),
-            existingTransactions = txDao.getAll(),
+            existingTransactions = existingTransactions,
             preferences = merchantPrefDao.getAll(),
-            existingPendingCandidates = importDao.getPendingCandidates(),
+            existingPendingCandidates = existingPendingCandidates,
             customCategories = categoryDao.getAll()
         )
         val stagedCandidate = candidates.first()
@@ -242,7 +417,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         val batchId = importDao.insertBatch(
             ImportBatchEntity(
                 channel = rec.channel,
-                sourceLabel = "支付通知实时捕获",
+                sourceLabel = sourceLabel,
                 totalCount = 1,
                 cleanCount = if (isClean) 1 else 0,
                 discrepancyCount = if (isClean) 0 else 1
@@ -250,26 +425,59 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         )
         val finalCandidate = stagedCandidate.copy(batchId = batchId)
         val newId = importDao.insertCandidate(finalCandidate)
-        return Result.success(finalCandidate.copy(id = newId))
+        return NotificationStageOutcome.Staged(finalCandidate.copy(id = newId))
+    }
+
+    private fun normalizeNotificationMatchText(raw: String): String =
+        raw.lowercase(Locale.ROOT).replace(Regex("""\s+"""), "").trim()
+
+    suspend fun stagePaymentNotification(
+        packageName: String,
+        title: String,
+        text: String,
+        occurredAtMillis: Long = System.currentTimeMillis(),
+        locationLabel: String = ""
+    ): Result<ImportCandidateEntity> {
+        return when (
+            val outcome = stagePaymentNotificationDetailed(
+                packageName = packageName,
+                title = title,
+                text = text,
+                occurredAtMillis = occurredAtMillis,
+                skipIfAlreadyRecorded = false,
+                locationLabel = locationLabel
+            )
+        ) {
+            is NotificationStageOutcome.Staged -> Result.success(outcome.candidate)
+            NotificationStageOutcome.AlreadyRecorded -> Result.failure(IllegalStateException("该笔通知记录已存在"))
+            is NotificationStageOutcome.Unparseable -> Result.failure(IllegalArgumentException(outcome.reason))
+        }
     }
 
     suspend fun stageSimulatedNotification(
         packageName: String,
         title: String,
-        text: String
-    ): Result<ImportCandidateEntity> = stagePaymentNotification(packageName, title, text)
+        text: String,
+        locationLabel: String = ""
+    ): Result<ImportCandidateEntity> = stagePaymentNotification(
+        packageName = packageName,
+        title = title,
+        text = text,
+        locationLabel = locationLabel
+    )
 
     suspend fun confirmCandidateToLedger(
         candidateId: Long,
         selectedCategoryId: String,
         selectedFundingSource: FundingSource,
         rememberMerchantPreference: Boolean,
-        note: String
-    ) {
-        val c = importDao.getCandidateById(candidateId) ?: return
-        if (c.resolutionStatus != CandidateResolution.PENDING) return
+        note: String,
+        selectedFundVault: FundVault? = null
+    ): Long? {
+        val c = importDao.getCandidateById(candidateId) ?: return null
+        if (c.resolutionStatus != CandidateResolution.PENDING) return null
 
-        txDao.insert(
+        val insertedId = txDao.insert(
             TransactionEntity(
                 externalRefId = c.externalRefId,
                 occurredAtMillis = c.occurredAtMillis,
@@ -278,6 +486,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 direction = c.direction,
                 channel = c.channel,
                 fundingSource = selectedFundingSource,
+                fundVault = selectedFundVault ?: c.fundVault,
                 sourceType = c.sourceType,
                 merchant = c.merchant,
                 rawDescription = c.rawDescription,
@@ -285,7 +494,8 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 classificationSource = ClassificationSource.USER_CONFIRMED,
                 confidenceScore = 1.0f,
                 reviewStatus = ReviewStatus.USER_CONFIRMED,
-                note = note.ifBlank { c.rawDescription }
+                note = note.ifBlank { c.rawDescription },
+                locationLabel = c.locationLabel
             )
         )
         importDao.updateResolution(candidateId, CandidateResolution.CONFIRMED_ADDED)
@@ -298,6 +508,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 )
             )
         }
+        return insertedId
     }
 
     suspend fun confirmAllCleanCandidates() {
@@ -336,11 +547,13 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
         categoryId: String,
         merchant: String,
         note: String,
-        occurredAtMillis: Long = System.currentTimeMillis()
-    ) {
+        occurredAtMillis: Long = System.currentTimeMillis(),
+        fundVault: FundVault = FundVault.POCKET,
+        locationLabel: String = ""
+    ): Long {
         val monthKey = MoneyFormatter.monthKeyFromMillis(occurredAtMillis)
         ensureInitialized(monthKey)
-        txDao.insert(
+        return txDao.insert(
             TransactionEntity(
                 externalRefId = "MANUAL_${occurredAtMillis}_$amountFen",
                 occurredAtMillis = occurredAtMillis,
@@ -349,6 +562,7 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 direction = direction,
                 channel = channel,
                 fundingSource = fundingSource,
+                fundVault = fundVault,
                 sourceType = TransactionSourceType.MANUAL_ENTRY,
                 merchant = merchant.ifBlank { "手动记账" },
                 rawDescription = note,
@@ -356,14 +570,34 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 classificationSource = ClassificationSource.USER_CONFIRMED,
                 confidenceScore = 1.0f,
                 reviewStatus = ReviewStatus.USER_CONFIRMED,
-                note = note
+                note = note,
+                locationLabel = locationLabel
             )
         )
     }
 
-    suspend fun updateTransactionCategory(txId: Long, categoryId: String, rememberMerchant: Boolean) {
-        val tx = txDao.getById(txId) ?: return
-        txDao.updateCategory(txId, categoryId, ClassificationSource.USER_CONFIRMED)
+    suspend fun updateTransactionCategory(
+        txId: Long,
+        categoryId: String,
+        rememberMerchant: Boolean
+    ): TransactionEntity? {
+        val tx = txDao.getById(txId) ?: return null
+        return updateTransactionCategoryAndVault(
+            txId = txId,
+            categoryId = categoryId,
+            fundVault = tx.fundVault,
+            rememberMerchant = rememberMerchant
+        )
+    }
+
+    suspend fun updateTransactionCategoryAndVault(
+        txId: Long,
+        categoryId: String,
+        fundVault: FundVault,
+        rememberMerchant: Boolean
+    ): TransactionEntity? {
+        val tx = txDao.getById(txId) ?: return null
+        txDao.updateCategoryAndVault(txId, categoryId, fundVault, ClassificationSource.USER_CONFIRMED)
         if (rememberMerchant && tx.merchant.isNotBlank()) {
             merchantPrefDao.upsert(
                 MerchantPreferenceEntity(
@@ -372,10 +606,39 @@ class EasySpendRepository(private val db: EasySpendDatabase) {
                 )
             )
         }
+        return tx
     }
 
-    suspend fun deleteTransaction(txId: Long) {
+    suspend fun deleteTransaction(txId: Long): TransactionEntity? {
+        val existing = txDao.getById(txId) ?: return null
         txDao.deleteById(txId)
+        return existing
+    }
+
+    suspend fun restoreDeletedTransaction(tx: TransactionEntity): Long {
+        return txDao.insert(tx)
+    }
+
+    suspend fun revertTransactionCategory(
+        txId: Long,
+        previousCategoryId: String,
+        previousSource: ClassificationSource
+    ) {
+        txDao.updateCategory(txId, previousCategoryId, previousSource)
+    }
+
+    suspend fun revertTransactionCategoryAndVault(
+        txId: Long,
+        previousCategoryId: String,
+        previousVault: FundVault,
+        previousSource: ClassificationSource
+    ) {
+        txDao.updateCategoryAndVault(txId, previousCategoryId, previousVault, previousSource)
+    }
+
+    suspend fun revertConfirmedCandidate(txId: Long, candidateId: Long) {
+        txDao.deleteById(txId)
+        importDao.updateResolution(candidateId, CandidateResolution.PENDING)
     }
 
     suspend fun updateBudgetLimit(monthKey: String, categoryId: String, newLimitFen: Long) {

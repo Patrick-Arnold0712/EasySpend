@@ -435,11 +435,10 @@ class UserApiConfigAndMobileLayoutTest {
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("dashboard_lazy_list")
-            .performScrollToNode(hasTestTag("demo_add_300_button"))
-        composeTestRule.onNodeWithTag("demo_add_300_button").assertIsDisplayed()
-        composeTestRule.onNodeWithText("记¥300学习费").assertIsDisplayed()
-        composeTestRule.onNodeWithText("问问财务助手").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("hero_balance_text").assertIsDisplayed()
+        composeTestRule.onNodeWithText("净收入").assertIsDisplayed()
+        composeTestRule.onNodeWithText("净支出").assertIsDisplayed()
+        composeTestRule.onNodeWithText("存钱进度").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("dashboard_lazy_list")
             .performScrollToNode(hasTestTag("donut_legend_daily"))

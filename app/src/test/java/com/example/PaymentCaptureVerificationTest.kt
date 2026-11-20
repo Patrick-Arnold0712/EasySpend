@@ -554,4 +554,122 @@ class PaymentCaptureVerificationTest {
         assertEquals("松涛园1楼大众窗口19", c1.merchant)
         assertEquals("松涛园1楼大众窗口15", c2.merchant)
     }
+
+    @Test
+    fun `backfill recovers missed active notifications and skips already staged or confirmed transactions`() = runTest {
+        PaymentNotificationListenerService.clearDiagnosticsForTests()
+        val t0 = 1_794_989_000_000L
+
+        val p1 = com.example.service.CapturedNotificationPayload(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            body = "已向 瑞幸咖啡 支付人民币16.80元",
+            postedAtMillis = t0,
+            notificationKey = "0|com.tencent.mm|301"
+        )
+        val p2 = com.example.service.CapturedNotificationPayload(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝通知",
+            body = "你已成功向中大学一食堂付款12.00元",
+            postedAtMillis = t0 + 10_000L,
+            notificationKey = "0|com.eg.android.AlipayGphone|302"
+        )
+
+        // First backfill: both missed notifications should be recovered into pending queue
+        val firstRun = PaymentNotificationListenerService.backfillPayloadsToRepository(
+            repo = repository,
+            payloads = listOf(p1, p2),
+            sourceLabel = "手动重连补录"
+        )
+        assertEquals(2, firstRun.recoveredCount)
+        assertEquals(0, firstRun.alreadyRecordedCount)
+        assertEquals(2, repository.pendingCandidatesFlow.first().size)
+
+        // Confirm p1 into formal ledger; leave p2 pending -> second backfill MUST skip both cleanly
+        val stagedP1 = repository.pendingCandidatesFlow.first().first { it.amountFen == 1680L }
+        repository.confirmCandidateToLedger(
+            candidateId = stagedP1.id,
+            selectedCategoryId = "beverage",
+            selectedFundingSource = FundingSource.LIVING_ALLOWANCE,
+            rememberMerchantPreference = false,
+            note = ""
+        )
+
+        val secondRun = PaymentNotificationListenerService.backfillPayloadsToRepository(
+            repo = repository,
+            payloads = listOf(p1, p2),
+            sourceLabel = "手动重连补录"
+        )
+        assertEquals(0, secondRun.recoveredCount)
+        assertEquals(2, secondRun.alreadyRecordedCount)
+        assertEquals(1, repository.pendingCandidatesFlow.first().size)
+    }
+
+    @Test
+    fun `manifest registers keep-alive service watchdog job and boot receiver and reconnect reports missing permission`() = runTest {
+        val pm = context.packageManager
+
+        val keepAliveCn = ComponentName(context, com.example.service.NotificationKeepAliveService::class.java)
+        val keepAliveInfo = pm.getServiceInfo(keepAliveCn, 0)
+        assertNotNull(keepAliveInfo)
+
+        val watchdogCn = ComponentName(context, com.example.service.NotificationWatchdogJobService::class.java)
+        val watchdogInfo = pm.getServiceInfo(watchdogCn, 0)
+        assertEquals("android.permission.BIND_JOB_SERVICE", watchdogInfo.permission)
+
+        val bootCn = ComponentName(context, com.example.service.NotificationBootReceiver::class.java)
+        val bootInfo = pm.getReceiverInfo(bootCn, 0)
+        assertNotNull(bootInfo)
+
+        Settings.Secure.putString(context.contentResolver, "enabled_notification_listeners", "")
+        val report = PaymentNotificationListenerService.reconnectAndBackfill(context)
+        assertTrue(report.permissionMissing)
+        assertFalse(report.connected)
+    }
+
+    @Test
+    fun `TransactionsAndImportScreen exposes keep-alive switch, battery button, and reconnect-backfill action`() {
+        var keepAliveToggledTo: Boolean? = null
+
+        composeRule.setContent {
+            EasySpendTheme(darkTheme = false) {
+                TransactionsAndImportScreen(
+                    state = EasySpendUiState(
+                        categories = ClassificationEngine.defaultCategories
+                    ),
+                    initialTab = 0,
+                    onImportCsvUri = { _, _ -> },
+                    onLoadDemoQueue = {},
+                    onSimulateNotification = {},
+                    onRunAiBatchClassify = {},
+                    onConfirmAllClean = {},
+                    onConfirmCandidate = { _, _, _, _, _ -> },
+                    onSkipOrDismissCandidate = { _, _ -> },
+                    onAddManualTransaction = { _, _, _, _, _, _, _ -> },
+                    onUpdateTxCategory = { _, _, _ -> },
+                    onDeleteTx = {},
+                    onToggleBackgroundKeepAlive = { enabled -> keepAliveToggledTo = enabled }
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("toggle_notification_diagnostics_button")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("background_keep_alive_switch")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        assertEquals(false, keepAliveToggledTo)
+
+        composeRule.onNodeWithTag("open_battery_optimization_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("rebind_notification_listener_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
 }

@@ -158,7 +158,7 @@ fun EasySpendTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
+    val targetColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -167,11 +167,11 @@ fun EasySpendTheme(
         else -> LightColorScheme
     }
 
-    val semantic = if (darkTheme) DarkSemanticColors else LightSemanticColors
+    val targetSemantic = if (darkTheme) DarkSemanticColors else LightSemanticColors
 
-    CompositionLocalProvider(LocalEasySpendColors provides semantic) {
+    CompositionLocalProvider(LocalEasySpendColors provides targetSemantic) {
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = targetColorScheme,
             typography = Typography,
             shapes = EasySpendShapes,
             content = content

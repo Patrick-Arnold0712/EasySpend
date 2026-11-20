@@ -12,4 +12,9 @@
     <string name="cd_close">关闭</string>
     <string name="cd_account">账号管理</string>
     <string name="cd_manage_categories">管理自定义分类</string>
+    <string name="cd_onboarding_guide">新手引导</string>
+    <string name="keep_alive_channel_name">后台记账守护</string>
+    <string name="keep_alive_channel_desc">保持支付通知监听在息屏与后台持续稳定运行</string>
+    <string name="keep_alive_notif_title">易支道正在后台守护自动记账</string>
+    <string name="keep_alive_notif_body">实时监听微信与支付宝扣款通知，点按查看账本</string>
 </resources>

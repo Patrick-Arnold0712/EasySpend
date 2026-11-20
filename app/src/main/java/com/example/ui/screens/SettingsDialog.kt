@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,7 +16,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -37,11 +49,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -51,8 +66,16 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.ApiProviderType
 import com.example.data.local.ThemeMode
 import com.example.domain.finance.MoneyFormatter
+import com.example.service.PermissionSetupManager
 import com.example.ui.ApiTestFeedback
 import com.example.ui.EasySpendUiState
+import com.example.ui.components.AnimatedStatusPill
+import com.example.ui.components.ModularActionTile
+import com.example.ui.components.SilkyModuleTransition
+import com.example.ui.motion.EasySpendMotion
+import com.example.ui.motion.FluidSegmentOption
+import com.example.ui.motion.FluidSegmentedBar
+import com.example.ui.motion.TonalIconBadge
 import com.example.ui.theme.semanticColors
 
 @Composable
@@ -149,10 +172,16 @@ fun SettingsAndAuditDialog(
     onTestApiConnection: (ApiProviderType, String, String, String) -> Unit,
     onClearApiTestFeedback: () -> Unit,
     onToggleBeginnerGuide: (Boolean) -> Unit = {},
+    onReplayOnboarding: () -> Unit = {},
     onOpenCategoryManager: () -> Unit = {},
     onOpenAccountManager: () -> Unit = {},
+    onOpenPermissionWizard: () -> Unit = {},
+    onToggleDetailedMode: (Boolean) -> Unit = {},
+    onToggleLocationClassification: (Boolean) -> Unit = {},
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val permSnapshot = remember(context) { PermissionSetupManager.snapshot(context) }
     val semantic = MaterialTheme.semanticColors
     var provider by remember(state.settings.apiProvider) { mutableStateOf(state.settings.apiProvider) }
     var baseUrl by remember(state.settings.apiBaseUrl) { mutableStateOf(state.settings.apiBaseUrl) }
@@ -160,216 +189,282 @@ fun SettingsAndAuditDialog(
     var model by remember(state.settings.apiModel) { mutableStateOf(state.settings.apiModel) }
     var keyVisible by remember { mutableStateOf(false) }
 
+    // 0 = 偏好模式, 1 = 账本权限, 2 = AI 模型, 3 = 审计
+    var activeModule by remember { mutableIntStateOf(0) }
+
     AlertDialog(
         onDismissRequest = {
             onClearApiTestFeedback()
             onDismiss()
         },
         containerColor = MaterialTheme.colorScheme.surface,
-        title = { Text("设置与大模型 API") },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("控制中心", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
+                AnimatedStatusPill(
+                    text = if (permSnapshot.allGranted) "权限就绪" else "权限 ${permSnapshot.grantedCount}/${permSnapshot.totalCount}",
+                    containerColor = if (permSnapshot.allGranted) semantic.safeContainer else semantic.warningContainer,
+                    contentColor = if (permSnapshot.allGranted) semantic.safe else semantic.warning
+                )
+            }
+        },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 500.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .heightIn(max = 510.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 0. Quick Entries: Local Account & Custom Categories
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FluidSegmentedBar(
+                    options = listOf(
+                        FluidSegmentOption("偏好", "settings_module_general"),
+                        FluidSegmentOption("账本", "settings_module_ledger"),
+                        FluidSegmentOption("AI", "settings_module_ai"),
+                        FluidSegmentOption("审计", "settings_module_audit")
+                    ),
+                    selectedIndex = activeModule,
+                    onSelect = { activeModule = it }
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onOpenAccountManager,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("settings_open_account_button")
-                    ) {
-                        Text(
-                            text = "账号：${state.accountState.currentAccount?.displayLabel ?: "管理"}",
-                            fontSize = 13.sp,
-                            maxLines = 1
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = onOpenCategoryManager,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("settings_open_categories_button")
-                    ) {
-                        Text(
-                            text = "分类管理 (${state.categories.size})",
-                            fontSize = 13.sp,
-                            maxLines = 1
-                        )
-                    }
-                }
+                    SilkyModuleTransition(targetIndex = activeModule) { moduleIdx ->
+                        when (moduleIdx) {
+                            // Module 0: Appearance, Detailed Mode, Reminders, Onboarding
+                            0 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SettingsModuleBlock(
+                                    title = "外观主题",
+                                    icon = Icons.Default.Palette
+                                ) {
+                                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                        val modes = listOf(
+                                            ThemeMode.SYSTEM to "跟随系统",
+                                            ThemeMode.LIGHT to "浅色",
+                                            ThemeMode.DARK to "深色"
+                                        )
+                                        modes.forEachIndexed { idx, (mode, shortLabel) ->
+                                            SegmentedButton(
+                                                selected = state.settings.themeMode == mode,
+                                                onClick = { onSelectThemeMode(mode) },
+                                                shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size),
+                                                modifier = Modifier.testTag("theme_mode_${mode.name.lowercase()}")
+                                            ) {
+                                                Text(shortLabel, maxLines = 1, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
 
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
+                                SettingsSwitchCard(
+                                    title = "详细版（资金库：零花 / 储蓄）",
+                                    subtitle = "显示零花库与储蓄库，支持为每笔收支归属资金库并独立统计出入数据。",
+                                    icon = Icons.Default.AccountBalanceWallet,
+                                    checked = state.settings.detailedModeEnabled,
+                                    onCheckedChange = onToggleDetailedMode,
+                                    switchTestTag = "detailed_mode_switch"
+                                )
 
-                // 1. User API Configuration
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("大模型 API 配置（直连调用）", style = MaterialTheme.typography.titleSmall)
-                    ApiConfigFormContent(
-                        provider = provider,
-                        baseUrl = baseUrl,
-                        apiKey = apiKey,
-                        model = model,
-                        keyVisible = keyVisible,
-                        feedback = state.apiTestFeedback,
-                        onSelectProvider = { chosen ->
-                            provider = chosen
-                            baseUrl = chosen.defaultBaseUrl
-                            model = chosen.defaultModel
-                            onClearApiTestFeedback()
-                        },
-                        onBaseUrlChange = { baseUrl = it },
-                        onApiKeyChange = { apiKey = it },
-                        onModelChange = { model = it },
-                        onToggleKeyVisible = { keyVisible = !keyVisible },
-                        onTestConnection = { onTestApiConnection(provider, baseUrl, apiKey, model) }
-                    )
-                    Button(
-                        onClick = { onSaveApiConfig(provider, baseUrl, apiKey, model) },
-                        enabled = apiKey.isNotBlank() && baseUrl.isNotBlank() && model.isNotBlank(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("settings_save_api_button"),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                    ) {
-                        Text("保存 API 配置")
-                    }
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-
-                // 2. Appearance Mode Selector (System / Light / Dark)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("外观主题", style = MaterialTheme.typography.titleSmall)
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        val modes = listOf(
-                            ThemeMode.SYSTEM to "跟随系统",
-                            ThemeMode.LIGHT to "浅色",
-                            ThemeMode.DARK to "深色"
-                        )
-                        modes.forEachIndexed { idx, (mode, shortLabel) ->
-                            SegmentedButton(
-                                selected = state.settings.themeMode == mode,
-                                onClick = { onSelectThemeMode(mode) },
-                                shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size),
-                                modifier = Modifier.testTag("theme_mode_${mode.name.lowercase()}")
-                            ) {
-                                Text(shortLabel, maxLines = 1, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-
-                // 3. Privacy Gate for Cloud AI
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("允许 AI 分析脱敏账单", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            text = "关闭后只保留本地记账与预算计算，不向云端发送任何数据。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = state.settings.aiCloudAnalysisEnabled,
-                        onCheckedChange = onToggleAiCloud,
-                        modifier = Modifier.testTag("privacy_ai_switch")
-                    )
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-
-                // Beginner Guide Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text("显示「新手快速体验」卡片", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            text = "关闭总览页新手体验卡片后，可在此重新开启。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = !state.settings.hideBeginnerGuide,
-                        onCheckedChange = onToggleBeginnerGuide,
-                        modifier = Modifier.testTag("show_beginner_guide_switch")
-                    )
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-
-                // 4. Daily Review Reminder Time
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "每日集中核对提醒时间",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        text = "只在每天固定时间提醒一次，不逐笔弹窗打扰。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(20 to 0, 21 to 30, 22 to 30).forEach { (h, m) ->
-                            val selected = state.settings.dailyReviewHour == h && state.settings.dailyReviewMinute == m
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSetDailyReviewTime(h, m) },
-                                label = { Text(String.format("%02d:%02d", h, m)) }
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = semantic.hairline)
-
-                // 5. Tool Audit Logs
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "助手查账记录 (${state.toolLogs.size})",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    if (state.toolLogs.isEmpty()) {
-                        Text(
-                            text = "还没有调用过助手查账工具。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        state.toolLogs.take(15).forEach { log ->
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceContainer,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
+                                SettingsModuleBlock(
+                                    title = "每日集中核对提醒",
+                                    icon = Icons.Default.NotificationsActive
+                                ) {
                                     Text(
-                                        text = "${log.toolName} · ${MoneyFormatter.formatTimestamp(log.executedAtMillis)}",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                    Text(
-                                        text = log.resultSummary,
+                                        text = "只在每天固定时间提醒一次，不逐笔弹窗打扰。",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf(20 to 0, 21 to 30, 22 to 30).forEach { (h, m) ->
+                                            val selected = state.settings.dailyReviewHour == h && state.settings.dailyReviewMinute == m
+                                            FilterChip(
+                                                selected = selected,
+                                                onClick = { onSetDailyReviewTime(h, m) },
+                                                label = { Text(String.format("%02d:%02d", h, m)) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                ModularActionTile(
+                                    title = "重温新手引导与目标向导",
+                                    caption = "随时回顾功能介绍、修改月生活费与存钱目标",
+                                    icon = Icons.Default.School,
+                                    onClick = onReplayOnboarding,
+                                    testTag = "settings_replay_onboarding_button",
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            // Module 1: Account, Categories, One-Tap Permissions, Location Classification
+                            1 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    ModularActionTile(
+                                        title = state.accountState.currentAccount?.displayLabel ?: "账号管理",
+                                        caption = "切换/修改账号",
+                                        icon = Icons.Default.AccountCircle,
+                                        onClick = onOpenAccountManager,
+                                        testTag = "settings_open_account_button",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    ModularActionTile(
+                                        title = "分类管理",
+                                        caption = "共 ${state.categories.size} 个分类",
+                                        icon = Icons.Default.Category,
+                                        onClick = onOpenCategoryManager,
+                                        testTag = "settings_open_categories_button",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                ModularActionTile(
+                                    title = "一键权限配置向导",
+                                    caption = if (permSnapshot.allGranted) {
+                                        "全部 4/4 核心权限已就绪"
+                                    } else {
+                                        "已就绪 ${permSnapshot.grantedCount}/${permSnapshot.totalCount}，一键补齐通知/定位/防掉线"
+                                    },
+                                    icon = Icons.Default.VerifiedUser,
+                                    highlighted = !permSnapshot.allGranted,
+                                    accentContainerColor = if (permSnapshot.allGranted) semantic.safeContainer else MaterialTheme.colorScheme.primaryContainer,
+                                    accentIconTint = if (permSnapshot.allGranted) semantic.safe else MaterialTheme.colorScheme.primary,
+                                    onClick = onOpenPermissionWizard,
+                                    testTag = "settings_one_tap_permissions_button",
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                SettingsSwitchCard(
+                                    title = "读账同步定位精准分类",
+                                    subtitle = "读取支付通知或记账时同步获取粗略位置，结合校园/医院/影院/商圈提升分类准度。",
+                                    icon = Icons.Default.LocationOn,
+                                    checked = state.settings.locationClassificationEnabled,
+                                    onCheckedChange = onToggleLocationClassification,
+                                    switchTestTag = "location_classification_switch"
+                                )
+                            }
+
+                            // Module 2: AI Privacy Gate + Direct API Config
+                            2 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SettingsSwitchCard(
+                                    title = "允许 AI 分析脱敏账单",
+                                    subtitle = "关闭后仅保留本地记账与预算计算，不向云端发送任何数据。",
+                                    icon = Icons.Default.Security,
+                                    checked = state.settings.aiCloudAnalysisEnabled,
+                                    onCheckedChange = onToggleAiCloud,
+                                    switchTestTag = "privacy_ai_switch"
+                                )
+
+                                SettingsModuleBlock(
+                                    title = "大模型 API 直连配置",
+                                    icon = Icons.Default.AutoAwesome
+                                ) {
+                                    ApiConfigFormContent(
+                                        provider = provider,
+                                        baseUrl = baseUrl,
+                                        apiKey = apiKey,
+                                        model = model,
+                                        keyVisible = keyVisible,
+                                        feedback = state.apiTestFeedback,
+                                        onSelectProvider = { chosen ->
+                                            provider = chosen
+                                            baseUrl = chosen.defaultBaseUrl
+                                            model = chosen.defaultModel
+                                            onClearApiTestFeedback()
+                                        },
+                                        onBaseUrlChange = { baseUrl = it },
+                                        onApiKeyChange = { apiKey = it },
+                                        onModelChange = { model = it },
+                                        onToggleKeyVisible = { keyVisible = !keyVisible },
+                                        onTestConnection = { onTestApiConnection(provider, baseUrl, apiKey, model) }
+                                    )
+                                    Button(
+                                        onClick = { onSaveApiConfig(provider, baseUrl, apiKey, model) },
+                                        enabled = apiKey.isNotBlank() && baseUrl.isNotBlank() && model.isNotBlank(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("settings_save_api_button"),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                                    ) {
+                                        Text("保存 API 配置")
+                                    }
+                                }
+                            }
+
+                            // Module 3: Tool Audit Logs
+                            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.History,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "助手查账审计记录",
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    }
+                                    AnimatedStatusPill(text = "${state.toolLogs.size} 条")
+                                }
+
+                                if (state.toolLogs.isEmpty()) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        shape = RoundedCornerShape(14.dp),
+                                        border = semantic.cardBorder,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "还没有调用过财务助手查账工具。每次 AI 查询账本都会在这里留下可审计记录。",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(14.dp)
+                                        )
+                                    }
+                                } else {
+                                    state.toolLogs.take(15).forEach { log ->
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = semantic.cardBorder,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${log.toolName} · ${MoneyFormatter.formatTimestamp(log.executedAtMillis)}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = log.resultSummary,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -386,6 +481,93 @@ fun SettingsAndAuditDialog(
             ) { Text("完成") }
         }
     )
+}
+
+@Composable
+private fun SettingsModuleBlock(
+    title: String,
+    icon: ImageVector,
+    content: @Composable () -> Unit
+) {
+    val semantic = MaterialTheme.semanticColors
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(14.dp),
+        border = semantic.cardBorder,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TonalIconBadge(
+                    icon = icon,
+                    size = 28.dp,
+                    iconSize = 15.dp
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    switchTestTag: String
+) {
+    val semantic = MaterialTheme.semanticColors
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(14.dp),
+        border = semantic.cardBorder,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            TonalIconBadge(
+                icon = icon,
+                size = 32.dp,
+                iconSize = 16.dp
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.testTag(switchTestTag)
+            )
+        }
+    }
 }
 
 @Composable
